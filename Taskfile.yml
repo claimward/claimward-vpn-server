@@ -1,0 +1,75 @@
+# Taskfile for claimward-vpn-server.
+# Install go-task: https://taskfile.dev   (pkgx install task)
+#
+# Local dev (no real WireGuard interface needed):
+#   task run:dev      # starts the server in dry-run mode on :8080 (github auth)
+version: "3"
+
+vars:
+  SERVER: claimward-server
+  BIN: bin
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds: [task --list]
+    silent: true
+
+  deps:
+    desc: Download Go dependencies
+    cmds: [go mod download]
+
+  build:
+    desc: Build the server
+    cmds:
+      - go build -o {{.BIN}}/{{.SERVER}} ./cmd/claimward-server
+    sources:
+      - "**/*.go"
+    generates:
+      - "{{.BIN}}/{{.SERVER}}"
+
+  run:
+    desc: Build and run the server (reads config from the environment)
+    deps: [build]
+    cmds:
+      - ./{{.BIN}}/{{.SERVER}}
+
+  run:dev:
+    desc: Run in dry-run mode on :8080 with an ephemeral key (no WireGuard device)
+    cmds:
+      - cmd: |
+          export WG_DRYRUN=true
+          export LISTEN_ADDR="${LISTEN_ADDR:-:8080}"
+          export AUTH_PROVIDER="${AUTH_PROVIDER:-github}"
+          export WG_ENDPOINT="${WG_ENDPOINT:-vpn.local:51820}"
+          export WG_PRIVATE_KEY="${WG_PRIVATE_KEY:-$(openssl rand -base64 32)}"
+          echo "dry-run server on $LISTEN_ADDR (auth=$AUTH_PROVIDER, endpoint=$WG_ENDPOINT)"
+          go run ./cmd/claimward-server
+        silent: true
+
+  gen-key:
+    desc: Print a fresh WireGuard private key (base64)
+    cmds:
+      - cmd: openssl rand -base64 32
+        silent: true
+
+  fmt:
+    desc: Format Go sources
+    cmds: [gofmt -w .]
+
+  vet:
+    desc: Vet Go sources
+    cmds: [go vet ./...]
+
+  tidy:
+    desc: Tidy go.mod / go.sum
+    cmds: [go mod tidy]
+
+  test:
+    desc: Run tests
+    cmds: [go test ./...]
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf {{.BIN}}
