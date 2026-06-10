@@ -47,6 +47,26 @@ tasks:
           go run ./cmd/claimward-server
         silent: true
 
+  dex:
+    desc: Run a local Dex OIDC server for development (via pkgx) on :5556
+    cmds:
+      - pkgx dex serve deploy/dev/dex-config.yaml
+
+  run:dev:oidc:
+    desc: Run dry-run, wired to the local Dex (start `task dex` in another shell first)
+    cmds:
+      - cmd: |
+          export AUTH_PROVIDER=oidc
+          export OIDC_ISSUER="${OIDC_ISSUER:-http://127.0.0.1:5556/dex}"
+          export OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-claimward}"
+          export WG_DRYRUN=true
+          export LISTEN_ADDR="${LISTEN_ADDR:-:8080}"
+          export WG_ENDPOINT="${WG_ENDPOINT:-vpn.local:51820}"
+          export WG_PRIVATE_KEY="${WG_PRIVATE_KEY:-$(openssl rand -base64 32)}"
+          echo "OIDC dev server on $LISTEN_ADDR (issuer=$OIDC_ISSUER, client=$OIDC_CLIENT_ID)"
+          go run ./cmd/claimward-server
+        silent: true
+
   gen-key:
     desc: Print a fresh WireGuard private key (base64)
     cmds:

@@ -1,0 +1,36 @@
+# Dex configuration for local Claimward development.
+#
+# Run it with:  dex serve deploy/dev/dex-config.yaml
+# Issuer:       http://127.0.0.1:5556/dex
+#
+# Test user:    user@claimward.test  /  claimward
+issuer: http://127.0.0.1:5556/dex
+
+# In-memory storage — no database, state resets on restart (fine for dev).
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  # Skip the consent screen for a smoother dev login. PKCE is enforced for
+  # public clients automatically.
+  skipApprovalScreen: true
+
+# The Claimward client. "public: true" means no client secret, and Dex then
+# accepts loopback redirect URIs on any port (RFC 8252) — which is exactly what
+# the native PKCE flow uses (http://127.0.0.1:<random>/callback).
+staticClients:
+  - id: claimward
+    name: Claimward
+    public: true
+
+# A built-in username/password user so you can log in without an upstream IdP.
+enablePasswordDB: true
+staticPasswords:
+  - email: "user@claimward.test"
+    # bcrypt hash of the password "claimward"
+    hash: "$2a$10$hADEW0AYJJdjd5rDujkZKOGNpdZ/n/ODm134ovIqE8rQ62.Bv/uJm"
+    username: "claimward"
+    userID: "00000000-0000-0000-0000-000000000001"
