@@ -1,0 +1,17 @@
+# Binaries
+/bin/
+/dist/
+claimward-server
+*.test
+
+# Go
+*.out
+go.work
+go.work.sum
+
+# Secrets / local config
+*.key
+.env
+
+# OS
+.DS_Store
