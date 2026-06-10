@@ -1,5 +1,7 @@
 # claimward-vpn-server
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/claimward/claimward-vpn-server.svg)](https://pkg.go.dev/github.com/claimward/claimward-vpn-server) [![Go Report Card](https://goreportcard.com/badge/github.com/claimward/claimward-vpn-server)](https://goreportcard.com/report/github.com/claimward/claimward-vpn-server) [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
+
 Control plane for the Claimward VPN. It authenticates devices with **OIDC** and
 programs a **WireGuard** gateway, one peer per enrolled device.
 
