@@ -15,9 +15,14 @@ type Config struct {
 	TLSCert    string // optional; if set with TLSKey, server serves HTTPS
 	TLSKey     string
 
-	OIDCIssuer     string   // required
-	OIDCClientID   string   // required (token audience)
-	AllowedDomains []string // optional email-domain allowlist for authz
+	AuthProvider string // "github" (default) or "oidc"
+
+	OIDCIssuer     string   // required when AuthProvider == "oidc"
+	OIDCClientID   string   // required when AuthProvider == "oidc" (token audience)
+	AllowedDomains []string // optional email-domain allowlist for authz (oidc)
+
+	GitHubAPIURL      string   // default https://api.github.com (set for GHE)
+	GitHubAllowedOrgs []string // optional org-membership allowlist (github)
 
 	WGInterface     string // kernel interface managed via wgctrl, e.g. "wg0"
 	WGEndpoint      string // public host:port advertised to clients (required)
@@ -35,21 +40,24 @@ type Config struct {
 // Load reads configuration from the environment and validates required fields.
 func Load() (*Config, error) {
 	c := &Config{
-		ListenAddr:     env("LISTEN_ADDR", ":8443"),
-		TLSCert:        os.Getenv("TLS_CERT"),
-		TLSKey:         os.Getenv("TLS_KEY"),
-		OIDCIssuer:     os.Getenv("OIDC_ISSUER"),
-		OIDCClientID:   os.Getenv("OIDC_CLIENT_ID"),
-		AllowedDomains: splitCSV(os.Getenv("OIDC_ALLOWED_DOMAINS")),
-		WGInterface:    env("WG_INTERFACE", "wg0"),
-		WGEndpoint:     os.Getenv("WG_ENDPOINT"),
-		WGPrivateKey:   os.Getenv("WG_PRIVATE_KEY"),
-		DryRun:         boolEnv("WG_DRYRUN", false),
-		VPNCIDR:        env("VPN_CIDR", "10.80.0.0/24"),
-		PushRoutes:     splitCSV(os.Getenv("PUSH_ROUTES")),
-		DNS:            splitCSV(os.Getenv("DNS")),
-		Keepalive:      intEnv("KEEPALIVE", 25),
-		LeaseTTL:       durEnv("LEASE_TTL", 24*time.Hour),
+		ListenAddr:        env("LISTEN_ADDR", ":8443"),
+		TLSCert:           os.Getenv("TLS_CERT"),
+		TLSKey:            os.Getenv("TLS_KEY"),
+		AuthProvider:      env("AUTH_PROVIDER", "github"),
+		OIDCIssuer:        os.Getenv("OIDC_ISSUER"),
+		OIDCClientID:      os.Getenv("OIDC_CLIENT_ID"),
+		AllowedDomains:    splitCSV(os.Getenv("OIDC_ALLOWED_DOMAINS")),
+		GitHubAPIURL:      os.Getenv("GITHUB_API_URL"),
+		GitHubAllowedOrgs: splitCSV(os.Getenv("GITHUB_ALLOWED_ORGS")),
+		WGInterface:       env("WG_INTERFACE", "wg0"),
+		WGEndpoint:        os.Getenv("WG_ENDPOINT"),
+		WGPrivateKey:      os.Getenv("WG_PRIVATE_KEY"),
+		DryRun:            boolEnv("WG_DRYRUN", false),
+		VPNCIDR:           env("VPN_CIDR", "10.80.0.0/24"),
+		PushRoutes:        splitCSV(os.Getenv("PUSH_ROUTES")),
+		DNS:               splitCSV(os.Getenv("DNS")),
+		Keepalive:         intEnv("KEEPALIVE", 25),
+		LeaseTTL:          durEnv("LEASE_TTL", 24*time.Hour),
 	}
 
 	if file := os.Getenv("WG_PRIVATE_KEY_FILE"); file != "" && c.WGPrivateKey == "" {
@@ -63,13 +71,22 @@ func Load() (*Config, error) {
 		c.PushRoutes = []string{c.VPNCIDR}
 	}
 
-	var missing []string
-	for k, v := range map[string]string{
-		"OIDC_ISSUER":    c.OIDCIssuer,
-		"OIDC_CLIENT_ID": c.OIDCClientID,
+	required := map[string]string{
 		"WG_ENDPOINT":    c.WGEndpoint,
 		"WG_PRIVATE_KEY": c.WGPrivateKey,
-	} {
+	}
+	switch c.AuthProvider {
+	case "github":
+		// No extra required vars; GITHUB_ALLOWED_ORGS is recommended for authz.
+	case "oidc":
+		required["OIDC_ISSUER"] = c.OIDCIssuer
+		required["OIDC_CLIENT_ID"] = c.OIDCClientID
+	default:
+		return nil, fmt.Errorf("invalid AUTH_PROVIDER %q (want \"github\" or \"oidc\")", c.AuthProvider)
+	}
+
+	var missing []string
+	for k, v := range required {
 		if v == "" {
 			missing = append(missing, k)
 		}

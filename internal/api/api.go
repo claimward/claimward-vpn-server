@@ -24,7 +24,7 @@ import (
 // Server holds the dependencies shared by all handlers.
 type Server struct {
 	cfg          *config.Config
-	verifier     *auth.Verifier
+	verifier     auth.Verifier
 	alloc        *ipam.Allocator
 	store        *store.Store
 	gw           wg.Gateway
@@ -33,7 +33,7 @@ type Server struct {
 }
 
 // New builds the API server.
-func New(cfg *config.Config, v *auth.Verifier, alloc *ipam.Allocator, st *store.Store, gw wg.Gateway, serverPub string, log *slog.Logger) *Server {
+func New(cfg *config.Config, v auth.Verifier, alloc *ipam.Allocator, st *store.Store, gw wg.Gateway, serverPub string, log *slog.Logger) *Server {
 	return &Server{cfg: cfg, verifier: v, alloc: alloc, store: st, gw: gw, serverPubKey: serverPub, log: log}
 }
 
