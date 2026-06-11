@@ -53,9 +53,9 @@ mfa:
         rpOrigins: ["http://localhost:5556"]
         # Require an external security key (YubiKey), not a platform authenticator.
         authenticatorAttachment: "cross-platform"
-        # Require user verification: the key must check a PIN (or biometric),
-        # so the factor is "possession + knowledge", not possession alone.
-        userVerification: "required"
+        # Request user verification (PIN/biometric) when the key supports it,
+        # without hard-failing keys that don't.
+        userVerification: "preferred"
         attestationPreference: "none"
         timeout: "120s"
   defaultMFAChain: ["webauthn"]
