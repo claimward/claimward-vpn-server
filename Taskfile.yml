@@ -48,16 +48,23 @@ tasks:
         silent: true
 
   dex:
-    desc: Run a local Dex OIDC server for development (via pkgx) on :5556
+    desc: Run local Dex (master, with YubiKey/WebAuthn MFA) for dev on :5556
     cmds:
-      - pkgx dex serve deploy/dev/dex-config.yaml
+      - cmd: |
+          # WebAuthn MFA is merged upstream (PR #4704) but unreleased, so run from
+          # master rather than `pkgx dex` (2.45.1, no WebAuthn). MFA needs the
+          # sessions feature flag.
+          export DEX_SESSIONS_ENABLED=true
+          echo "Dex (master, WebAuthn MFA) on http://localhost:5556/dex — user@claimward.test / claimward"
+          go run github.com/dexidp/dex/cmd/dex@master serve deploy/dev/dex-config.yaml
+        silent: true
 
   run:dev:oidc:
     desc: Run dry-run, wired to the local Dex (start `task dex` in another shell first)
     cmds:
       - cmd: |
           export AUTH_PROVIDER=oidc
-          export OIDC_ISSUER="${OIDC_ISSUER:-http://127.0.0.1:5556/dex}"
+          export OIDC_ISSUER="${OIDC_ISSUER:-http://localhost:5556/dex}"
           export OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-claimward}"
           export WG_DRYRUN=true
           export LISTEN_ADDR="${LISTEN_ADDR:-:8080}"

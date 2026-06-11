@@ -1,12 +1,19 @@
-# Dex configuration for local Claimward development.
+# Dex configuration for local Claimward development, with YubiKey/FIDO2 WebAuthn
+# as a second factor after the password login.
 #
-# Run it with:  dex serve deploy/dev/dex-config.yaml
-# Issuer:       http://127.0.0.1:5556/dex
+# WebAuthn MFA landed upstream in dexidp/dex (PR #4704) but is NOT in a released
+# version yet, so run Dex from source/master (see `task dex`), not `pkgx dex`.
+# MFA also requires the sessions feature flag: DEX_SESSIONS_ENABLED=true.
 #
-# Test user:    user@claimward.test  /  claimward
-issuer: http://127.0.0.1:5556/dex
+#   DEX_SESSIONS_ENABLED=true dex serve deploy/dev/dex-config.yaml
+#   Issuer:    http://localhost:5556/dex
+#   Test user: user@claimward.test / claimward  (then register your YubiKey)
+#
+# Note: the issuer host is "localhost" (not 127.0.0.1) because the WebAuthn RP ID
+# must be a domain — IP addresses are rejected by browsers. "localhost" is both a
+# valid RP ID and a secure context.
+issuer: http://localhost:5556/dex
 
-# In-memory storage — no database, state resets on restart (fine for dev).
 storage:
   type: memory
 
@@ -14,19 +21,17 @@ web:
   http: 0.0.0.0:5556
 
 oauth2:
-  # Skip the consent screen for a smoother dev login. PKCE is enforced for
-  # public clients automatically.
   skipApprovalScreen: true
 
-# The Claimward client. "public: true" means no client secret, and Dex then
-# accepts loopback redirect URIs on any port (RFC 8252) — which is exactly what
-# the native PKCE flow uses (http://127.0.0.1:<random>/callback).
+# Required for MFA (with DEX_SESSIONS_ENABLED=true).
+sessions:
+  cookieName: claimward_dex
+
 staticClients:
   - id: claimward
     name: Claimward
     public: true
 
-# A built-in username/password user so you can log in without an upstream IdP.
 enablePasswordDB: true
 staticPasswords:
   - email: "user@claimward.test"
@@ -34,3 +39,21 @@ staticPasswords:
     hash: "$2a$10$hADEW0AYJJdjd5rDujkZKOGNpdZ/n/ODm134ovIqE8rQ62.Bv/uJm"
     username: "claimward"
     userID: "00000000-0000-0000-0000-000000000001"
+
+# YubiKey / FIDO2 as a second factor, enforced after the local password login
+# for every client (defaultMFAChain).
+mfa:
+  authenticators:
+    - id: webauthn
+      type: WebAuthn
+      connectorTypes: ["local"] # only the built-in password DB
+      config:
+        rpDisplayName: "Claimward"
+        rpID: "localhost"
+        rpOrigins: ["http://localhost:5556"]
+        # Require an external security key (YubiKey), not a platform authenticator.
+        authenticatorAttachment: "cross-platform"
+        userVerification: "preferred"
+        attestationPreference: "none"
+        timeout: "120s"
+  defaultMFAChain: ["webauthn"]
