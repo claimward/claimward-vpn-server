@@ -15,6 +15,9 @@ type Config struct {
 	TLSCert    string // optional; if set with TLSKey, server serves HTTPS
 	TLSKey     string
 
+	GRPCAddr     string // RouteService gRPC listen address, e.g. ":8444"
+	GRPCEndpoint string // host:port advertised to clients for route streaming
+
 	AuthProvider string // "github" (default) or "oidc"
 
 	OIDCIssuer     string   // required when AuthProvider == "oidc"
@@ -43,6 +46,8 @@ func Load() (*Config, error) {
 		ListenAddr:        env("LISTEN_ADDR", ":8443"),
 		TLSCert:           os.Getenv("TLS_CERT"),
 		TLSKey:            os.Getenv("TLS_KEY"),
+		GRPCAddr:          env("GRPC_ADDR", ":8444"),
+		GRPCEndpoint:      os.Getenv("GRPC_ENDPOINT"),
 		AuthProvider:      env("AUTH_PROVIDER", "github"),
 		OIDCIssuer:        os.Getenv("OIDC_ISSUER"),
 		OIDCClientID:      os.Getenv("OIDC_CLIENT_ID"),
