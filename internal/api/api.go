@@ -16,8 +16,9 @@ import (
 	"github.com/claimward/claimward-vpn-server/internal/auth"
 	"github.com/claimward/claimward-vpn-server/internal/config"
 	"github.com/claimward/claimward-vpn-server/internal/ipam"
-	"github.com/claimward/claimward-vpn-server/internal/routes"
+	"github.com/claimward/claimward-vpn-server/internal/metrics"
 	"github.com/claimward/claimward-vpn-server/internal/store"
+	"github.com/claimward/claimward-vpn-server/internal/tenant"
 	"github.com/claimward/claimward-vpn-server/internal/wg"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -29,14 +30,15 @@ type Server struct {
 	alloc        *ipam.Allocator
 	store        *store.Store
 	gw           wg.Gateway
-	routes       *routes.Manager
+	tenants      *tenant.Store
+	metrics      *metrics.Metrics
 	serverPubKey string
 	log          *slog.Logger
 }
 
 // New builds the API server.
-func New(cfg *config.Config, v auth.Verifier, alloc *ipam.Allocator, st *store.Store, gw wg.Gateway, rm *routes.Manager, serverPub string, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, verifier: v, alloc: alloc, store: st, gw: gw, routes: rm, serverPubKey: serverPub, log: log}
+func New(cfg *config.Config, v auth.Verifier, alloc *ipam.Allocator, st *store.Store, gw wg.Gateway, ts *tenant.Store, m *metrics.Metrics, serverPub string, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, verifier: v, alloc: alloc, store: st, gw: gw, tenants: ts, metrics: m, serverPubKey: serverPub, log: log}
 }
 
 // Handler returns the configured HTTP mux.
@@ -46,7 +48,6 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST "+protocol.PathEnroll, s.authenticated(s.handleEnroll))
 	mux.Handle("POST "+protocol.PathHeartbeat, s.authenticated(s.handleHeartbeat))
 	mux.Handle("POST "+protocol.PathDeregister, s.authenticated(s.handleDeregister))
-	mux.Handle("POST /api/v1/routes", s.authenticated(s.handleSetRoutes))
 	return s.withLogging(mux)
 }
 
@@ -118,33 +119,20 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	})
 	s.log.Info("enrolled", "email", claims.Email, "ip", ip.String(), "device", req.Device.Name, "platform", req.Device.Platform)
 
-	cur := s.routes.Current()
+	tenantID := s.tenants.TenantIDForEmail(claims.Email)
+	rs := s.tenants.Routes(tenantID)
+	s.metrics.EnrollInc(tenantID)
+	s.log.Info("enrolled tenant routes", "tenant", tenantID, "email", claims.Email, "routes", rs.AllowedIPs)
 	writeJSON(w, http.StatusOK, protocol.EnrollResponse{
 		AssignedIP:          ip.String() + "/32",
 		ServerPublicKey:     s.serverPubKey,
 		Endpoint:            s.cfg.WGEndpoint,
-		AllowedIPs:          cur.AllowedIPs,
-		DNS:                 cur.DNS,
+		AllowedIPs:          rs.AllowedIPs,
+		DNS:                 rs.DNS,
 		GRPCEndpoint:        s.cfg.GRPCEndpoint,
 		PersistentKeepalive: s.cfg.Keepalive,
 		LeaseExpiresAt:      expiry,
 	})
-}
-
-// handleSetRoutes (admin) replaces the advertised routes and pushes the change
-// to all gRPC watchers. Bearer-authenticated like the other endpoints; in a real
-// deployment restrict this to admins.
-func (s *Server) handleSetRoutes(w http.ResponseWriter, r *http.Request, claims *auth.Claims) {
-	var req struct {
-		AllowedIPs []string `json:"allowed_ips"`
-		DNS        []string `json:"dns"`
-	}
-	if !decode(w, r, &req) {
-		return
-	}
-	set := s.routes.Set(req.AllowedIPs, req.DNS)
-	s.log.Info("routes updated", "by", claims.Email, "serial", set.Serial, "allowed_ips", set.AllowedIPs)
-	writeJSON(w, http.StatusOK, map[string]any{"serial": set.Serial, "allowed_ips": set.AllowedIPs, "dns": set.DNS})
 }
 
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, claims *auth.Claims) {

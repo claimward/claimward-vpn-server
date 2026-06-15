@@ -1,0 +1,27 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+/* Brand theme: deep indigo backdrop matching the macOS client. */
+@plugin "daisyui/theme" {
+  name: "claimward";
+  default: true;
+  color-scheme: dark;
+  --color-base-100: oklch(20% 0.04 280);
+  --color-base-200: oklch(17% 0.04 280);
+  --color-base-300: oklch(14% 0.04 280);
+  --color-base-content: oklch(92% 0.02 280);
+  --color-primary: oklch(62% 0.19 280);
+  --color-primary-content: oklch(98% 0.01 280);
+  --color-secondary: oklch(65% 0.15 200);
+  --color-accent: oklch(70% 0.17 160);
+  --color-success: oklch(70% 0.18 150);
+  --color-error: oklch(64% 0.22 25);
+  --radius-box: 0.75rem;
+  --radius-field: 0.5rem;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100vh;
+}

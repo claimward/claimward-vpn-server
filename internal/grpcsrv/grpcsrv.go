@@ -1,5 +1,5 @@
-// Package grpcsrv serves the RouteService over gRPC: it streams the current
-// routes to authenticated clients and pushes updates from the routes.Manager.
+// Package grpcsrv serves the RouteService over gRPC: it streams a client's
+// tenant routes and pushes updates from the tenant.Store.
 package grpcsrv
 
 import (
@@ -8,26 +8,33 @@ import (
 
 	"github.com/claimward/claimward-vpn-client/pkg/routespb"
 	"github.com/claimward/claimward-vpn-server/internal/auth"
-	"github.com/claimward/claimward-vpn-server/internal/routes"
+	"github.com/claimward/claimward-vpn-server/internal/tenant"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
-// Server implements routespb.RouteServiceServer backed by a routes.Manager.
+type emailKeyT struct{}
+
+var emailKey emailKeyT
+
+// Server implements routespb.RouteServiceServer backed by the tenant store.
 type Server struct {
 	routespb.UnimplementedRouteServiceServer
-	mgr *routes.Manager
+	tenants *tenant.Store
 }
 
 // New returns a RouteService server.
-func New(mgr *routes.Manager) *Server { return &Server{mgr: mgr} }
+func New(ts *tenant.Store) *Server { return &Server{tenants: ts} }
 
-// Watch sends the current routes, then streams updates until the client leaves.
+// Watch streams the caller's tenant routes (current + updates) until they leave.
 func (s *Server) Watch(_ *routespb.WatchRequest, stream routespb.RouteService_WatchServer) error {
-	id, ch, cur := s.mgr.Subscribe()
-	defer s.mgr.Unsubscribe(id)
+	email, _ := stream.Context().Value(emailKey).(string)
+	tenantID := s.tenants.TenantIDForEmail(email)
+
+	id, ch, cur := s.tenants.Subscribe(tenantID)
+	defer s.tenants.Unsubscribe(tenantID, id)
 
 	if err := stream.Send(toProto(cur)); err != nil {
 		return err
@@ -47,24 +54,33 @@ func (s *Server) Watch(_ *routespb.WatchRequest, stream routespb.RouteService_Wa
 	}
 }
 
-func toProto(s routes.Set) *routespb.RouteUpdate {
+func toProto(s tenant.RouteSet) *routespb.RouteUpdate {
 	return &routespb.RouteUpdate{AllowedIps: s.AllowedIPs, Dns: s.DNS, Serial: s.Serial}
 }
 
-// AuthStreamInterceptor verifies the OIDC bearer (gRPC metadata) before any
-// streaming RPC is served.
+// AuthStreamInterceptor verifies the OIDC bearer (gRPC metadata) and stashes the
+// caller's email in the stream context (used to resolve their tenant).
 func AuthStreamInterceptor(v auth.Verifier) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		tok := bearerFromContext(ss.Context())
 		if tok == "" {
 			return status.Error(codes.Unauthenticated, "missing bearer token")
 		}
-		if _, err := v.Verify(ss.Context(), tok); err != nil {
+		claims, err := v.Verify(ss.Context(), tok)
+		if err != nil {
 			return status.Error(codes.Unauthenticated, "invalid token: "+err.Error())
 		}
-		return handler(srv, ss)
+		ctx := context.WithValue(ss.Context(), emailKey, claims.Email)
+		return handler(srv, &wrappedStream{ServerStream: ss, ctx: ctx})
 	}
 }
+
+type wrappedStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *wrappedStream) Context() context.Context { return w.ctx }
 
 func bearerFromContext(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)

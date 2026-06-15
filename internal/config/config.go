@@ -18,6 +18,8 @@ type Config struct {
 	GRPCAddr     string // RouteService gRPC listen address, e.g. ":8444"
 	GRPCEndpoint string // host:port advertised to clients for route streaming
 
+	AdminToken string // bearer for the admin WebUI/API; empty disables admin
+
 	AuthProvider string // "github" (default) or "oidc"
 
 	OIDCIssuer     string   // required when AuthProvider == "oidc"
@@ -48,6 +50,7 @@ func Load() (*Config, error) {
 		TLSKey:            os.Getenv("TLS_KEY"),
 		GRPCAddr:          env("GRPC_ADDR", ":8444"),
 		GRPCEndpoint:      os.Getenv("GRPC_ENDPOINT"),
+		AdminToken:        os.Getenv("ADMIN_TOKEN"),
 		AuthProvider:      env("AUTH_PROVIDER", "github"),
 		OIDCIssuer:        os.Getenv("OIDC_ISSUER"),
 		OIDCClientID:      os.Getenv("OIDC_CLIENT_ID"),
