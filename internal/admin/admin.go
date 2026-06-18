@@ -10,7 +10,9 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/claimward/claimward-vpn-server/internal/store"
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
@@ -44,6 +46,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /admin/api/overview", s.guard(s.overview))
+	mux.HandleFunc("GET /admin/api/peers", s.guard(s.listPeers))
 	mux.HandleFunc("GET /admin/api/tenants", s.guard(s.listTenants))
 	mux.HandleFunc("POST /admin/api/tenants", s.guard(s.createTenant))
 	mux.HandleFunc("GET /admin/api/tenants/{id}", s.guard(s.getTenant))
@@ -74,6 +77,36 @@ func (s *Server) overview(w http.ResponseWriter, _ *http.Request) {
 		"peers":    len(s.peers.List()),
 		"watchers": s.tenants.WatcherCount(),
 	})
+}
+
+// peerView is the admin-facing JSON shape for an enrolled peer.
+type peerView struct {
+	Email       string    `json:"email"`
+	Device      string    `json:"device"`
+	OS          string    `json:"os"`
+	Platform    string    `json:"platform"`
+	IP          string    `json:"ip"`
+	EnrolledAt  time.Time `json:"enrolled_at"`
+	LeaseExpiry time.Time `json:"lease_expiry"`
+}
+
+// listPeers returns the currently enrolled peers, most recently connected first.
+func (s *Server) listPeers(w http.ResponseWriter, _ *http.Request) {
+	peers := s.peers.List()
+	out := make([]peerView, 0, len(peers))
+	for _, p := range peers {
+		out = append(out, peerView{
+			Email:       p.Email,
+			Device:      p.Device.Name,
+			OS:          p.Device.OS,
+			Platform:    p.Device.Platform,
+			IP:          p.IP.String(),
+			EnrolledAt:  p.EnrolledAt,
+			LeaseExpiry: p.LeaseExpiry,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].EnrolledAt.After(out[j].EnrolledAt) })
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) listTenants(w http.ResponseWriter, _ *http.Request) {

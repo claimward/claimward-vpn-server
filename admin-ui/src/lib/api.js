@@ -32,6 +32,7 @@ async function req(method, path, body) {
 
 export const api = {
   overview: () => req('GET', '/overview'),
+  listPeers: () => req('GET', '/peers'),
   listTenants: () => req('GET', '/tenants'),
   createTenant: (t) => req('POST', '/tenants', t),
   updateTenant: (id, t) => req('PUT', `/tenants/${encodeURIComponent(id)}`, t),

@@ -8,19 +8,32 @@
   let loginError = $state('')
 
   let overview = $state(null)
+  let peers = $state([])
   let tenants = $state([])
   let loadError = $state('')
   let loading = $state(false)
 
+  // Render a timestamp as a short local date-time, '—' if missing/zero.
+  function fmtTime(ts) {
+    if (!ts) return '—'
+    const d = new Date(ts)
+    if (isNaN(d) || d.getFullYear() < 2000) return '—'
+    return d.toLocaleString()
+  }
+
   // null = none, 'new' = create form, or a tenant object = edit form.
   let editing = $state(null)
+
+  // Active tab: 'peers' | 'tenants'.
+  let view = $state('peers')
 
   async function refresh() {
     loading = true
     loadError = ''
     try {
-      const [ov, ts] = await Promise.all([api.overview(), api.listTenants()])
+      const [ov, ps, ts] = await Promise.all([api.overview(), api.listPeers(), api.listTenants()])
       overview = ov
+      peers = ps
       tenants = ts
       authed = true
     } catch (err) {
@@ -51,6 +64,7 @@
     token = ''
     authed = false
     overview = null
+    peers = []
     tenants = []
   }
 
@@ -142,6 +156,66 @@
         </div>
       </section>
 
+      <!-- Tabs -->
+      <div role="tablist" class="tabs tabs-bordered">
+        <button
+          role="tab"
+          class="tab {view === 'peers' ? 'tab-active' : ''}"
+          onclick={() => (view = 'peers')}
+        >
+          Active peers
+          <span class="badge badge-ghost badge-sm ml-2">{overview?.peers ?? peers.length}</span>
+        </button>
+        <button
+          role="tab"
+          class="tab {view === 'tenants' ? 'tab-active' : ''}"
+          onclick={() => (view = 'tenants')}
+        >
+          Tenants & routes
+          <span class="badge badge-ghost badge-sm ml-2">{overview?.tenants ?? tenants.length}</span>
+        </button>
+      </div>
+
+      {#if view === 'peers'}
+      <!-- Active peers -->
+      <section class="space-y-4">
+        <div class="overflow-x-auto rounded-box border border-base-300">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Device</th>
+                <th>IP</th>
+                <th>Connected</th>
+                <th>Lease expiry</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each peers as p (p.ip)}
+                <tr class="hover">
+                  <td>{p.email || '—'}</td>
+                  <td>
+                    {p.device || '—'}
+                    {#if p.os || p.platform}
+                      <span class="badge badge-ghost badge-xs ml-1">{[p.os, p.platform].filter(Boolean).join(' · ')}</span>
+                    {/if}
+                  </td>
+                  <td class="font-mono text-sm">{p.ip}</td>
+                  <td class="text-sm opacity-80">{fmtTime(p.enrolled_at)}</td>
+                  <td class="text-sm opacity-80">{fmtTime(p.lease_expiry)}</td>
+                </tr>
+              {:else}
+                <tr>
+                  <td colspan="5" class="py-6 text-center text-sm opacity-60">No active peers.</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {/if}
+
+      {#if view === 'tenants'}
       <!-- Tenants -->
       <section class="space-y-4">
         <div class="flex items-center justify-between">
@@ -214,6 +288,7 @@
           that tenant over gRPC.
         </p>
       </section>
+      {/if}
     </main>
   {/if}
 </div>
