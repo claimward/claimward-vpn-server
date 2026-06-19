@@ -37,4 +37,6 @@ export const api = {
   createTenant: (t) => req('POST', '/tenants', t),
   updateTenant: (id, t) => req('PUT', `/tenants/${encodeURIComponent(id)}`, t),
   deleteTenant: (id) => req('DELETE', `/tenants/${encodeURIComponent(id)}`),
+  getSettings: () => req('GET', '/settings'),
+  updateSettings: (s) => req('PUT', '/settings', s),
 }

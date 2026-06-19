@@ -24,17 +24,36 @@
   // null = none, 'new' = create form, or a tenant object = edit form.
   let editing = $state(null)
 
-  // Active tab: 'peers' | 'tenants'.
+  // Active tab: 'peers' | 'tenants' | 'settings'.
   let view = $state('peers')
+
+  // Server settings (invite email). settingsForm is the editable draft.
+  let settings = $state(null)
+  let settingsForm = $state({ mail_from: '', smtp_addr: '', invite_subject: '', invite_body: '' })
+  let settingsMsg = $state('')
+  let settingsErr = $state('')
+  let savingSettings = $state(false)
 
   async function refresh() {
     loading = true
     loadError = ''
     try {
-      const [ov, ps, ts] = await Promise.all([api.overview(), api.listPeers(), api.listTenants()])
+      const [ov, ps, ts, set] = await Promise.all([
+        api.overview(),
+        api.listPeers(),
+        api.listTenants(),
+        api.getSettings(),
+      ])
       overview = ov
       peers = ps
       tenants = ts
+      settings = set
+      settingsForm = {
+        mail_from: set.mail_from ?? '',
+        smtp_addr: set.smtp_addr ?? '',
+        invite_subject: set.invite_subject ?? '',
+        invite_body: set.invite_body ?? '',
+      }
       authed = true
     } catch (err) {
       if (err.status === 401) {
@@ -75,6 +94,21 @@
     await refresh()
   }
 
+  async function saveSettings(e) {
+    e.preventDefault()
+    settingsMsg = ''
+    settingsErr = ''
+    savingSettings = true
+    try {
+      settings = await api.updateSettings(settingsForm)
+      settingsMsg = 'Settings saved.'
+    } catch (err) {
+      settingsErr = err.message
+    } finally {
+      savingSettings = false
+    }
+  }
+
   async function remove(t) {
     if (!confirm(`Delete tenant "${t.name || t.id}"? Connected clients fall back to default.`)) return
     try {
@@ -100,10 +134,16 @@
       <span class="badge badge-primary badge-outline badge-sm">admin</span>
     </div>
     {#if authed}
-      <div class="flex-none gap-2">
+      <div class="flex-none items-center gap-2">
         <button class="btn btn-ghost btn-sm" onclick={refresh} disabled={loading}>
           {#if loading}<span class="loading loading-spinner loading-xs"></span>{/if}
           Refresh
+        </button>
+        <button
+          class="btn btn-ghost btn-sm {view === 'settings' ? 'btn-active text-primary' : ''}"
+          onclick={() => (view = 'settings')}
+        >
+          Settings
         </button>
         <button class="btn btn-ghost btn-sm" onclick={logout}>Sign out</button>
       </div>
@@ -184,6 +224,7 @@
             <thead>
               <tr>
                 <th>User</th>
+                <th>Tenant</th>
                 <th>Device</th>
                 <th>IP</th>
                 <th>Connected</th>
@@ -194,6 +235,9 @@
               {#each peers as p (p.ip)}
                 <tr class="hover">
                   <td>{p.email || '—'}</td>
+                  <td>
+                    <span class="badge badge-outline badge-sm">{p.tenant || 'default'}</span>
+                  </td>
                   <td>
                     {p.device || '—'}
                     {#if p.os || p.platform}
@@ -206,7 +250,7 @@
                 </tr>
               {:else}
                 <tr>
-                  <td colspan="5" class="py-6 text-center text-sm opacity-60">No active peers.</td>
+                  <td colspan="6" class="py-6 text-center text-sm opacity-60">No active peers.</td>
                 </tr>
               {/each}
             </tbody>
@@ -241,7 +285,7 @@
               <tr>
                 <th>ID</th>
                 <th>Name</th>
-                <th>Domains</th>
+                <th>Members</th>
                 <th>AllowedIPs</th>
                 <th>DNS</th>
                 <th class="text-right">Serial</th>
@@ -265,7 +309,11 @@
                       {/if}
                     </td>
                     <td>{t.name}</td>
-                    <td class="font-mono text-xs opacity-80">{(t.domains ?? []).join(', ') || '—'}</td>
+                    <td class="text-sm opacity-80" title={(t.members ?? []).join(', ')}>
+                      {(t.members ?? []).length
+                        ? `${(t.members ?? []).length} member${(t.members ?? []).length > 1 ? 's' : ''}`
+                        : '—'}
+                    </td>
                     <td class="font-mono text-xs opacity-80">{(t.allowed_ips ?? []).join(', ') || '—'}</td>
                     <td class="font-mono text-xs opacity-80">{(t.dns ?? []).join(', ') || '—'}</td>
                     <td class="text-right font-mono text-sm">{t.serial}</td>
@@ -287,6 +335,83 @@
           Saving a tenant bumps its serial and pushes the new routes to all connected clients of
           that tenant over gRPC.
         </p>
+      </section>
+      {/if}
+
+      {#if view === 'settings'}
+      <!-- Settings: invitation email -->
+      <section class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold">Invitation email</h2>
+          <span class="badge {settings?.enabled ? 'badge-success' : 'badge-ghost'} badge-outline">
+            {settings?.enabled ? 'enabled' : 'disabled'}
+          </span>
+        </div>
+
+        {#if settingsErr}
+          <div class="alert alert-error py-2 text-sm">{settingsErr}</div>
+        {/if}
+        {#if settingsMsg}
+          <div class="alert alert-success py-2 text-sm">{settingsMsg}</div>
+        {/if}
+
+        <form class="card bg-base-200 shadow" onsubmit={saveSettings}>
+          <div class="card-body gap-4">
+            <label class="form-control w-full">
+              <span class="label-text mb-1">Sender (From)</span>
+              <input
+                class="input input-bordered w-full"
+                placeholder="Claimward VPN &lt;vpn@example.org&gt;"
+                bind:value={settingsForm.mail_from}
+              />
+              <span class="label-text mt-1 text-xs opacity-60">
+                Display name + address, or a bare address. Leave blank to disable invite emails.
+              </span>
+            </label>
+
+            <label class="form-control w-full">
+              <span class="label-text mb-1">SMTP relay (host:port)</span>
+              <input
+                class="input input-bordered w-full font-mono"
+                placeholder="127.0.0.1:25"
+                bind:value={settingsForm.smtp_addr}
+              />
+              <span class="label-text mt-1 text-xs opacity-60">
+                Where the server posts mail — typically the local Postfix smarthost.
+              </span>
+            </label>
+
+            <label class="form-control w-full">
+              <span class="label-text mb-1">Subject</span>
+              <input
+                class="input input-bordered w-full"
+                placeholder={"You've been invited to the {{.TenantName}} VPN"}
+                bind:value={settingsForm.invite_subject}
+              />
+            </label>
+
+            <label class="form-control w-full">
+              <span class="label-text mb-1">Body</span>
+              <textarea
+                class="textarea textarea-bordered min-h-40 w-full font-mono text-sm"
+                placeholder="Email body…"
+                bind:value={settingsForm.invite_body}
+              ></textarea>
+              <span class="label-text mt-1 text-xs opacity-60">
+                Placeholders: <code>{'{{.Email}}'}</code>, <code>{'{{.TenantName}}'}</code>,
+                <code>{'{{.TenantID}}'}</code>, <code>{'{{.PortalURL}}'}</code>. Leave subject/body
+                blank to use the built-in defaults.
+              </span>
+            </label>
+
+            <div class="flex items-center gap-3">
+              <button class="btn btn-primary" type="submit" disabled={savingSettings}>
+                {#if savingSettings}<span class="loading loading-spinner loading-xs"></span>{/if}
+                Save settings
+              </button>
+            </div>
+          </div>
+        </form>
       </section>
       {/if}
     </main>

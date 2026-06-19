@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST "+protocol.PathEnroll, s.authenticated(s.handleEnroll))
 	mux.Handle("POST "+protocol.PathHeartbeat, s.authenticated(s.handleHeartbeat))
 	mux.Handle("POST "+protocol.PathDeregister, s.authenticated(s.handleDeregister))
+	mux.Handle("GET "+protocol.PathTenants, s.authenticated(s.handleTenants))
 	return s.withLogging(mux)
 }
 
@@ -76,6 +77,38 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// handleTenants returns the tenants the authenticated user may connect to.
+func (s *Server) handleTenants(w http.ResponseWriter, _ *http.Request, claims *auth.Claims) {
+	entitled := s.tenants.TenantsForEmail(claims.Email)
+	out := make([]protocol.TenantInfo, 0, len(entitled))
+	for _, t := range entitled {
+		out = append(out, protocol.TenantInfo{ID: t.ID, Name: t.Name})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// chooseTenant resolves which tenant to use from the user's entitled set and
+// their optional explicit choice. ok is false when the set is empty, the choice
+// is ambiguous (multiple tenants, none specified), or the chosen tenant is not
+// one the user belongs to.
+func chooseTenant(entitled []tenant.Tenant, chosen string) (string, bool) {
+	if len(entitled) == 0 {
+		return "", false
+	}
+	if chosen == "" {
+		if len(entitled) == 1 {
+			return entitled[0].ID, true
+		}
+		return "", false
+	}
+	for _, t := range entitled {
+		if t.ID == chosen {
+			return t.ID, true
+		}
+	}
+	return "", false
+}
+
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *auth.Claims) {
 	var req protocol.EnrollRequest
 	if !decode(w, r, &req) {
@@ -84,6 +117,22 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	pub, err := wgtypes.ParseKey(req.PublicKey)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_public_key", err.Error())
+		return
+	}
+
+	// Resolve and authorize the tenant. Access is by explicit membership; the
+	// user picks among the tenants they were invited to.
+	entitled := s.tenants.TenantsForEmail(claims.Email)
+	tenantID, ok := chooseTenant(entitled, req.Tenant)
+	if !ok {
+		switch {
+		case len(entitled) == 0:
+			writeErr(w, http.StatusForbidden, "no_tenant", "you have not been invited to any tenant")
+		case req.Tenant == "":
+			writeErr(w, http.StatusBadRequest, "tenant_required", "you belong to multiple tenants; specify which to connect to")
+		default:
+			writeErr(w, http.StatusForbidden, "not_a_member", "you are not a member of tenant "+req.Tenant)
+		}
 		return
 	}
 
@@ -112,6 +161,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 		PublicKey:   req.PublicKey,
 		Subject:     claims.Subject,
 		Email:       claims.Email,
+		Tenant:      tenantID,
 		IP:          ip,
 		Device:      req.Device,
 		EnrolledAt:  time.Now(),
@@ -119,7 +169,6 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	})
 	s.log.Info("enrolled", "email", claims.Email, "ip", ip.String(), "device", req.Device.Name, "platform", req.Device.Platform)
 
-	tenantID := s.tenants.TenantIDForEmail(claims.Email)
 	rs := s.tenants.Routes(tenantID)
 	s.metrics.EnrollInc(tenantID)
 	s.log.Info("enrolled tenant routes", "tenant", tenantID, "email", claims.Email, "routes", rs.AllowedIPs)

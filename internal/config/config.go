@@ -40,6 +40,13 @@ type Config struct {
 	DNS        []string      // optional DNS servers pushed to clients
 	Keepalive  int           // persistent keepalive seconds advertised to clients
 	LeaseTTL   time.Duration // how long an enrollment lasts without a heartbeat
+
+	TenantsFile string // JSON file to persist tenants/memberships; "" = in-memory only
+
+	SMTPAddr     string // host:port of an SMTP relay/MTA for invite emails (default 127.0.0.1:25)
+	MailFrom     string // initial/default From for invite emails; admin UI may override at runtime
+	PortalURL    string // optional link included in the invite email body
+	SettingsFile string // JSON file persisting admin-editable settings (sender); "" = in-memory
 }
 
 // Load reads configuration from the environment and validates required fields.
@@ -66,6 +73,11 @@ func Load() (*Config, error) {
 		DNS:               splitCSV(os.Getenv("DNS")),
 		Keepalive:         intEnv("KEEPALIVE", 25),
 		LeaseTTL:          durEnv("LEASE_TTL", 24*time.Hour),
+		TenantsFile:       os.Getenv("TENANTS_FILE"),
+		SMTPAddr:          env("SMTP_ADDR", "127.0.0.1:25"),
+		MailFrom:          os.Getenv("MAIL_FROM"),
+		PortalURL:         os.Getenv("PORTAL_URL"),
+		SettingsFile:      os.Getenv("SETTINGS_FILE"),
 	}
 
 	if file := os.Getenv("WG_PRIVATE_KEY_FILE"); file != "" && c.WGPrivateKey == "" {

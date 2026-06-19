@@ -14,6 +14,7 @@ type Peer struct {
 	PublicKey   string // wg base64
 	Subject     string // OIDC sub
 	Email       string
+	Tenant      string // tenant ID assigned at enroll (by email domain)
 	IP          net.IP
 	Device      protocol.DeviceInfo
 	EnrolledAt  time.Time
