@@ -27,7 +27,7 @@ import (
 type Server struct {
 	cfg          *config.Config
 	verifier     auth.Verifier
-	alloc        *ipam.Allocator
+	alloc        *ipam.Manager
 	store        *store.Store
 	gw           wg.Gateway
 	tenants      *tenant.Store
@@ -37,7 +37,7 @@ type Server struct {
 }
 
 // New builds the API server.
-func New(cfg *config.Config, v auth.Verifier, alloc *ipam.Allocator, st *store.Store, gw wg.Gateway, ts *tenant.Store, m *metrics.Metrics, serverPub string, log *slog.Logger) *Server {
+func New(cfg *config.Config, v auth.Verifier, alloc *ipam.Manager, st *store.Store, gw wg.Gateway, ts *tenant.Store, m *metrics.Metrics, serverPub string, log *slog.Logger) *Server {
 	return &Server{cfg: cfg, verifier: v, alloc: alloc, store: st, gw: gw, tenants: ts, metrics: m, serverPubKey: serverPub, log: log}
 }
 
@@ -138,12 +138,25 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 
 	expiry := time.Now().Add(s.cfg.LeaseTTL)
 
-	// Reuse the existing assignment if this device is already enrolled.
+	// Address the peer from its tenant's own subnet (the tenant's first routed
+	// CIDR) so a peer connected to a tenant lives inside that tenant's network.
+	// Tenants without a usable host subnet fall back to the shared global pool.
+	rs := s.tenants.Routes(tenantID)
+	subnet := tenantSubnet(rs.AllowedIPs)
+
+	// Reuse the existing assignment when this device re-enrolls into the same
+	// tenant; if it switched tenants, release the old address first so the new
+	// one is drawn from the new tenant's subnet.
 	var ip net.IP
-	if existing := s.store.Get(req.PublicKey); existing != nil {
+	existing := s.store.Get(req.PublicKey)
+	if existing != nil && existing.Tenant == tenantID {
 		ip = existing.IP
+		s.alloc.Reserve(tenantID, subnet, ip) // keep it marked used in the pool
 	} else {
-		ip, err = s.alloc.Allocate()
+		if existing != nil {
+			s.alloc.Release(existing.Tenant, existing.IP)
+		}
+		ip, err = s.alloc.Allocate(tenantID, subnet)
 		if err != nil {
 			writeErr(w, http.StatusServiceUnavailable, "pool_exhausted", err.Error())
 			return
@@ -151,7 +164,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	}
 
 	if err := s.gw.AddPeer(pub, ip); err != nil {
-		s.alloc.Release(ip)
+		s.alloc.Release(tenantID, ip)
 		s.log.Error("gateway add peer failed", "err", err)
 		writeErr(w, http.StatusInternalServerError, "gateway_error", "could not program gateway")
 		return
@@ -169,7 +182,6 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	})
 	s.log.Info("enrolled", "email", claims.Email, "ip", ip.String(), "device", req.Device.Name, "platform", req.Device.Platform)
 
-	rs := s.tenants.Routes(tenantID)
 	s.metrics.EnrollInc(tenantID)
 	s.log.Info("enrolled tenant routes", "tenant", tenantID, "email", claims.Email, "routes", rs.AllowedIPs)
 	writeJSON(w, http.StatusOK, protocol.EnrollResponse{
@@ -220,7 +232,7 @@ func (s *Server) handleDeregister(w http.ResponseWriter, r *http.Request, claims
 		}
 	}
 	s.store.Delete(req.PublicKey)
-	s.alloc.Release(peer.IP)
+	s.alloc.Release(peer.Tenant, peer.IP)
 	s.log.Info("deregistered", "email", claims.Email, "ip", peer.IP.String())
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -235,12 +247,31 @@ func (s *Server) ReapExpired() {
 			}
 		}
 		s.store.Delete(p.PublicKey)
-		s.alloc.Release(p.IP)
+		s.alloc.Release(p.Tenant, p.IP)
 		s.log.Info("lease expired, peer removed", "email", p.Email, "ip", p.IP.String())
 	}
 }
 
 // --- helpers ---
+
+// tenantSubnet picks the CIDR a tenant's peers are addressed from: its first
+// routed CIDR that is a normal IPv4 host subnet (a usable host range, not a
+// /31, /32 or the default route). Returns "" when none qualifies, which makes
+// the allocator fall back to the shared global pool.
+func tenantSubnet(allowedIPs []string) string {
+	for _, c := range allowedIPs {
+		ip, ipnet, err := net.ParseCIDR(c)
+		if err != nil || ip.To4() == nil {
+			continue
+		}
+		ones, bits := ipnet.Mask.Size()
+		if bits != 32 || ones == 0 || ones >= 31 {
+			continue
+		}
+		return ipnet.String()
+	}
+	return ""
+}
 
 func bearerToken(r *http.Request) string {
 	h := r.Header.Get("Authorization")

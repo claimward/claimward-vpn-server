@@ -79,7 +79,7 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
-	alloc, err := ipam.New(cfg.VPNCIDR)
+	alloc, err := ipam.NewManager(cfg.VPNCIDR)
 	if err != nil {
 		return err
 	}
