@@ -8,6 +8,7 @@ import (
 
 	"github.com/claimward/claimward-vpn-client/pkg/routespb"
 	"github.com/claimward/claimward-vpn-server/internal/auth"
+	"github.com/claimward/claimward-vpn-server/internal/store"
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -23,15 +24,23 @@ var emailKey emailKeyT
 type Server struct {
 	routespb.UnimplementedRouteServiceServer
 	tenants *tenant.Store
+	peers   *store.Store
 }
 
 // New returns a RouteService server.
-func New(ts *tenant.Store) *Server { return &Server{tenants: ts} }
+func New(ts *tenant.Store, peers *store.Store) *Server {
+	return &Server{tenants: ts, peers: peers}
+}
 
 // Watch streams the caller's tenant routes (current + updates) until they leave.
-func (s *Server) Watch(_ *routespb.WatchRequest, stream routespb.RouteService_WatchServer) error {
-	email, _ := stream.Context().Value(emailKey).(string)
-	tenantID := s.tenants.TenantIDForEmail(email)
+// The tenant is the one the peer chose at enroll (looked up by its public key),
+// so a user who belongs to several tenants gets the routes of the one they are
+// actually connected to. Falls back to the default tenant if the peer is unknown.
+func (s *Server) Watch(req *routespb.WatchRequest, stream routespb.RouteService_WatchServer) error {
+	tenantID := tenant.DefaultID
+	if p := s.peers.Get(req.GetPublicKey()); p != nil && p.Tenant != "" {
+		tenantID = p.Tenant
+	}
 
 	id, ch, cur := s.tenants.Subscribe(tenantID)
 	defer s.tenants.Unsubscribe(tenantID, id)

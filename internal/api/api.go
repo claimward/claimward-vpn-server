@@ -27,7 +27,7 @@ import (
 type Server struct {
 	cfg          *config.Config
 	verifier     auth.Verifier
-	alloc        *ipam.Allocator
+	alloc        *ipam.Manager
 	store        *store.Store
 	gw           wg.Gateway
 	tenants      *tenant.Store
@@ -37,7 +37,7 @@ type Server struct {
 }
 
 // New builds the API server.
-func New(cfg *config.Config, v auth.Verifier, alloc *ipam.Allocator, st *store.Store, gw wg.Gateway, ts *tenant.Store, m *metrics.Metrics, serverPub string, log *slog.Logger) *Server {
+func New(cfg *config.Config, v auth.Verifier, alloc *ipam.Manager, st *store.Store, gw wg.Gateway, ts *tenant.Store, m *metrics.Metrics, serverPub string, log *slog.Logger) *Server {
 	return &Server{cfg: cfg, verifier: v, alloc: alloc, store: st, gw: gw, tenants: ts, metrics: m, serverPubKey: serverPub, log: log}
 }
 
@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST "+protocol.PathEnroll, s.authenticated(s.handleEnroll))
 	mux.Handle("POST "+protocol.PathHeartbeat, s.authenticated(s.handleHeartbeat))
 	mux.Handle("POST "+protocol.PathDeregister, s.authenticated(s.handleDeregister))
+	mux.Handle("GET "+protocol.PathTenants, s.authenticated(s.handleTenants))
 	return s.withLogging(mux)
 }
 
@@ -76,6 +77,38 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// handleTenants returns the tenants the authenticated user may connect to.
+func (s *Server) handleTenants(w http.ResponseWriter, _ *http.Request, claims *auth.Claims) {
+	entitled := s.tenants.TenantsForEmail(claims.Email)
+	out := make([]protocol.TenantInfo, 0, len(entitled))
+	for _, t := range entitled {
+		out = append(out, protocol.TenantInfo{ID: t.ID, Name: t.Name})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// chooseTenant resolves which tenant to use from the user's entitled set and
+// their optional explicit choice. ok is false when the set is empty, the choice
+// is ambiguous (multiple tenants, none specified), or the chosen tenant is not
+// one the user belongs to.
+func chooseTenant(entitled []tenant.Tenant, chosen string) (string, bool) {
+	if len(entitled) == 0 {
+		return "", false
+	}
+	if chosen == "" {
+		if len(entitled) == 1 {
+			return entitled[0].ID, true
+		}
+		return "", false
+	}
+	for _, t := range entitled {
+		if t.ID == chosen {
+			return t.ID, true
+		}
+	}
+	return "", false
+}
+
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *auth.Claims) {
 	var req protocol.EnrollRequest
 	if !decode(w, r, &req) {
@@ -87,14 +120,43 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 		return
 	}
 
+	// Resolve and authorize the tenant. Access is by explicit membership; the
+	// user picks among the tenants they were invited to.
+	entitled := s.tenants.TenantsForEmail(claims.Email)
+	tenantID, ok := chooseTenant(entitled, req.Tenant)
+	if !ok {
+		switch {
+		case len(entitled) == 0:
+			writeErr(w, http.StatusForbidden, "no_tenant", "you have not been invited to any tenant")
+		case req.Tenant == "":
+			writeErr(w, http.StatusBadRequest, "tenant_required", "you belong to multiple tenants; specify which to connect to")
+		default:
+			writeErr(w, http.StatusForbidden, "not_a_member", "you are not a member of tenant "+req.Tenant)
+		}
+		return
+	}
+
 	expiry := time.Now().Add(s.cfg.LeaseTTL)
 
-	// Reuse the existing assignment if this device is already enrolled.
+	// Address the peer from its tenant's own subnet (the tenant's first routed
+	// CIDR) so a peer connected to a tenant lives inside that tenant's network.
+	// Tenants without a usable host subnet fall back to the shared global pool.
+	rs := s.tenants.Routes(tenantID)
+	subnet := tenantSubnet(rs.AllowedIPs)
+
+	// Reuse the existing assignment when this device re-enrolls into the same
+	// tenant; if it switched tenants, release the old address first so the new
+	// one is drawn from the new tenant's subnet.
 	var ip net.IP
-	if existing := s.store.Get(req.PublicKey); existing != nil {
+	existing := s.store.Get(req.PublicKey)
+	if existing != nil && existing.Tenant == tenantID {
 		ip = existing.IP
+		s.alloc.Reserve(tenantID, subnet, ip) // keep it marked used in the pool
 	} else {
-		ip, err = s.alloc.Allocate()
+		if existing != nil {
+			s.alloc.Release(existing.Tenant, existing.IP)
+		}
+		ip, err = s.alloc.Allocate(tenantID, subnet)
 		if err != nil {
 			writeErr(w, http.StatusServiceUnavailable, "pool_exhausted", err.Error())
 			return
@@ -102,7 +164,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	}
 
 	if err := s.gw.AddPeer(pub, ip); err != nil {
-		s.alloc.Release(ip)
+		s.alloc.Release(tenantID, ip)
 		s.log.Error("gateway add peer failed", "err", err)
 		writeErr(w, http.StatusInternalServerError, "gateway_error", "could not program gateway")
 		return
@@ -112,6 +174,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 		PublicKey:   req.PublicKey,
 		Subject:     claims.Subject,
 		Email:       claims.Email,
+		Tenant:      tenantID,
 		IP:          ip,
 		Device:      req.Device,
 		EnrolledAt:  time.Now(),
@@ -119,8 +182,6 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	})
 	s.log.Info("enrolled", "email", claims.Email, "ip", ip.String(), "device", req.Device.Name, "platform", req.Device.Platform)
 
-	tenantID := s.tenants.TenantIDForEmail(claims.Email)
-	rs := s.tenants.Routes(tenantID)
 	s.metrics.EnrollInc(tenantID)
 	s.log.Info("enrolled tenant routes", "tenant", tenantID, "email", claims.Email, "routes", rs.AllowedIPs)
 	writeJSON(w, http.StatusOK, protocol.EnrollResponse{
@@ -171,7 +232,7 @@ func (s *Server) handleDeregister(w http.ResponseWriter, r *http.Request, claims
 		}
 	}
 	s.store.Delete(req.PublicKey)
-	s.alloc.Release(peer.IP)
+	s.alloc.Release(peer.Tenant, peer.IP)
 	s.log.Info("deregistered", "email", claims.Email, "ip", peer.IP.String())
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -186,12 +247,31 @@ func (s *Server) ReapExpired() {
 			}
 		}
 		s.store.Delete(p.PublicKey)
-		s.alloc.Release(p.IP)
+		s.alloc.Release(p.Tenant, p.IP)
 		s.log.Info("lease expired, peer removed", "email", p.Email, "ip", p.IP.String())
 	}
 }
 
 // --- helpers ---
+
+// tenantSubnet picks the CIDR a tenant's peers are addressed from: its first
+// routed CIDR that is a normal IPv4 host subnet (a usable host range, not a
+// /31, /32 or the default route). Returns "" when none qualifies, which makes
+// the allocator fall back to the shared global pool.
+func tenantSubnet(allowedIPs []string) string {
+	for _, c := range allowedIPs {
+		ip, ipnet, err := net.ParseCIDR(c)
+		if err != nil || ip.To4() == nil {
+			continue
+		}
+		ones, bits := ipnet.Mask.Size()
+		if bits != 32 || ones == 0 || ones >= 31 {
+			continue
+		}
+		return ipnet.String()
+	}
+	return ""
+}
 
 func bearerToken(r *http.Request) string {
 	h := r.Header.Get("Authorization")

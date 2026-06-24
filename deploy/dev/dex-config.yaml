@@ -6,8 +6,10 @@
 # MFA also requires the sessions feature flag: DEX_SESSIONS_ENABLED=true.
 #
 #   DEX_SESSIONS_ENABLED=true dex serve deploy/dev/dex-config.yaml
-#   Issuer:    http://localhost:5556/dex
-#   Test user: user@claimward.test / claimward  (then register your YubiKey)
+#   Issuer:     http://localhost:5556/dex
+#   Test users: user@claimward.test / claimward
+#               yannick.fitamant@polytechnique.edu / claimward
+#   MFA is disabled in dev (see defaultMFAChain below), so password alone works.
 #
 # Note: the issuer host is "localhost" (not 127.0.0.1) because the WebAuthn RP ID
 # must be a domain — IP addresses are rejected by browsers. "localhost" is both a
@@ -39,9 +41,15 @@ staticPasswords:
     hash: "$2a$10$hADEW0AYJJdjd5rDujkZKOGNpdZ/n/ODm134ovIqE8rQ62.Bv/uJm"
     username: "claimward"
     userID: "00000000-0000-0000-0000-000000000001"
+  - email: "yannick.fitamant@polytechnique.edu"
+    # bcrypt hash of the password "claimward"
+    hash: "$2a$10$hADEW0AYJJdjd5rDujkZKOGNpdZ/n/ODm134ovIqE8rQ62.Bv/uJm"
+    username: "yannick.fitamant"
+    userID: "00000000-0000-0000-0000-000000000002"
 
-# YubiKey / FIDO2 as a second factor, enforced after the local password login
-# for every client (defaultMFAChain).
+# YubiKey / FIDO2 as a second factor. The authenticator stays defined, but MFA is
+# NOT enforced in dev (defaultMFAChain commented out) so test users can sign in
+# with a password alone — no YubiKey registration required.
 mfa:
   authenticators:
     - id: webauthn
@@ -58,4 +66,5 @@ mfa:
         userVerification: "preferred"
         attestationPreference: "none"
         timeout: "120s"
-  defaultMFAChain: ["webauthn"]
+  # MFA disabled in dev — re-enable by uncommenting to enforce WebAuthn:
+  # defaultMFAChain: ["webauthn"]

@@ -10,25 +10,32 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
+	"github.com/claimward/claimward-vpn-server/internal/mailer"
+	"github.com/claimward/claimward-vpn-server/internal/settings"
 	"github.com/claimward/claimward-vpn-server/internal/store"
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
 )
 
 // Server is the admin HTTP surface.
 type Server struct {
-	tenants *tenant.Store
-	peers   *store.Store
-	token   string
-	ui      fs.FS
-	log     *slog.Logger
+	tenants  *tenant.Store
+	peers    *store.Store
+	token    string
+	ui       fs.FS
+	mailer   *mailer.Mailer
+	settings *settings.Store
+	log      *slog.Logger
 }
 
 // New builds the admin server. token is the ADMIN_TOKEN; if empty, the admin
-// API and UI are disabled.
-func New(tenants *tenant.Store, peers *store.Store, token string, ui fs.FS, log *slog.Logger) *Server {
-	return &Server{tenants: tenants, peers: peers, token: token, ui: ui, log: log}
+// API and UI are disabled. mailer (may be disabled) emails newly-invited members;
+// settings holds the admin-editable sender address.
+func New(tenants *tenant.Store, peers *store.Store, token string, ui fs.FS, ml *mailer.Mailer, set *settings.Store, log *slog.Logger) *Server {
+	return &Server{tenants: tenants, peers: peers, token: token, ui: ui, mailer: ml, settings: set, log: log}
 }
 
 // Enabled reports whether the admin surface is configured.
@@ -44,11 +51,14 @@ func (s *Server) Register(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /admin/api/overview", s.guard(s.overview))
+	mux.HandleFunc("GET /admin/api/peers", s.guard(s.listPeers))
 	mux.HandleFunc("GET /admin/api/tenants", s.guard(s.listTenants))
 	mux.HandleFunc("POST /admin/api/tenants", s.guard(s.createTenant))
 	mux.HandleFunc("GET /admin/api/tenants/{id}", s.guard(s.getTenant))
 	mux.HandleFunc("PUT /admin/api/tenants/{id}", s.guard(s.updateTenant))
 	mux.HandleFunc("DELETE /admin/api/tenants/{id}", s.guard(s.deleteTenant))
+	mux.HandleFunc("GET /admin/api/settings", s.guard(s.getSettings))
+	mux.HandleFunc("PUT /admin/api/settings", s.guard(s.updateSettings))
 	// SPA + assets.
 	mux.Handle("/admin/", http.StripPrefix("/admin/", http.FileServer(http.FS(s.ui))))
 }
@@ -76,6 +86,38 @@ func (s *Server) overview(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// peerView is the admin-facing JSON shape for an enrolled peer.
+type peerView struct {
+	Email       string    `json:"email"`
+	Tenant      string    `json:"tenant"`
+	Device      string    `json:"device"`
+	OS          string    `json:"os"`
+	Platform    string    `json:"platform"`
+	IP          string    `json:"ip"`
+	EnrolledAt  time.Time `json:"enrolled_at"`
+	LeaseExpiry time.Time `json:"lease_expiry"`
+}
+
+// listPeers returns the currently enrolled peers, most recently connected first.
+func (s *Server) listPeers(w http.ResponseWriter, _ *http.Request) {
+	peers := s.peers.List()
+	out := make([]peerView, 0, len(peers))
+	for _, p := range peers {
+		out = append(out, peerView{
+			Email:       p.Email,
+			Tenant:      p.Tenant,
+			Device:      p.Device.Name,
+			OS:          p.Device.OS,
+			Platform:    p.Device.Platform,
+			IP:          p.IP.String(),
+			EnrolledAt:  p.EnrolledAt,
+			LeaseExpiry: p.LeaseExpiry,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].EnrolledAt.After(out[j].EnrolledAt) })
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) listTenants(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.tenants.List())
 }
@@ -99,6 +141,7 @@ func (s *Server) createTenant(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.inviteNew(nil, t.Members, t)
 	s.log.Info("tenant created", "id", t.ID)
 	writeJSON(w, http.StatusOK, t)
 }
@@ -108,13 +151,65 @@ func (s *Server) updateTenant(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	t, err := s.tenants.Update(r.PathValue("id"), in.Name, in.Domains, in.AllowedIPs, in.DNS)
+	id := r.PathValue("id")
+	var oldMembers []string
+	if prev, ok := s.tenants.Get(id); ok {
+		oldMembers = prev.Members
+	}
+	t, err := s.tenants.Update(id, in.Name, in.Domains, in.Members, in.AllowedIPs, in.DNS)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.inviteNew(oldMembers, t.Members, t)
 	s.log.Info("tenant routes updated", "id", t.ID, "serial", t.Serial, "allowed_ips", t.AllowedIPs)
 	writeJSON(w, http.StatusOK, t)
+}
+
+// inviteNew emails every member present in current but not in old. Sends run in
+// the background so a slow/failing MTA never blocks the API response.
+func (s *Server) inviteNew(old, current []string, t tenant.Tenant) {
+	if !s.mailer.Enabled() {
+		return
+	}
+	seen := make(map[string]bool, len(old))
+	for _, m := range old {
+		seen[strings.ToLower(strings.TrimSpace(m))] = true
+	}
+	for _, m := range current {
+		addr := strings.TrimSpace(m)
+		if addr == "" || !strings.Contains(addr, "@") {
+			continue
+		}
+		if !seen[strings.ToLower(addr)] {
+			go s.mailer.SendInvite(addr, t.Name, t.ID)
+		}
+	}
+}
+
+// settingsView is the admin-facing JSON shape for server settings. The mail_*
+// fields are editable; enabled is read-only context for the UI.
+type settingsView struct {
+	settings.Settings
+	Enabled bool `json:"enabled"`
+}
+
+func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, settingsView{Settings: s.settings.Get(), Enabled: s.mailer.Enabled()})
+}
+
+func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
+	var in settings.Settings
+	if !decode(w, r, &in) {
+		return
+	}
+	cur, err := s.settings.Update(in)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.log.Info("settings updated", "mail_from", cur.MailFrom, "smtp_addr", cur.SMTPAddr)
+	writeJSON(w, http.StatusOK, settingsView{Settings: cur, Enabled: s.mailer.Enabled()})
 }
 
 func (s *Server) deleteTenant(w http.ResponseWriter, r *http.Request) {

@@ -1,26 +1,32 @@
 // Package tenant is the multi-tenant route store: each tenant owns a set of
 // WireGuard routes (AllowedIPs/DNS) and a broadcast channel so gRPC watchers of
-// that tenant get pushed updates. Clients are mapped to a tenant by the email
-// domain of their OIDC identity, falling back to the default tenant.
+// that tenant get pushed updates. A user may belong to several tenants; access
+// is by explicit membership — an admin invites the user by email — and the user
+// chooses which tenant to connect to.
 //
-// State is in-memory (MVP), mirroring the rest of the server.
+// State is kept in memory and, when a file path is configured, mirrored to a
+// JSON file so tenants and memberships survive restarts.
 package tenant
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 )
 
-// DefaultID is the tenant used for identities that match no domain.
+// DefaultID is the built-in tenant. With membership-based access it is a regular
+// tenant (it still cannot be deleted); a user sees it only if invited to it.
 const DefaultID = "default"
 
 // Tenant is the persisted configuration of a tenant.
 type Tenant struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
-	Domains    []string `json:"domains"` // email domains mapped to this tenant
+	Domains    []string `json:"domains"`     // legacy; retained but no longer grants access
+	Members    []string `json:"members"`     // invited user emails — the access list
 	AllowedIPs []string `json:"allowed_ips"`
 	DNS        []string `json:"dns"`
 	Serial     uint64   `json:"serial"`
@@ -43,36 +49,92 @@ type Store struct {
 	mu      sync.Mutex
 	tenants map[string]*tenantState
 	nextSub int
+	path    string // JSON file to persist tenants to; "" disables persistence
 }
 
-// New creates a Store seeded with a default tenant carrying the given routes.
-func New(defaultAllowedIPs, defaultDNS []string) *Store {
-	s := &Store{tenants: map[string]*tenantState{}}
-	s.tenants[DefaultID] = &tenantState{
-		t:    Tenant{ID: DefaultID, Name: "Default", AllowedIPs: defaultAllowedIPs, DNS: defaultDNS, Serial: 1},
-		subs: map[int]chan RouteSet{},
+// New creates a Store. If path is non-empty and the file exists, tenants are
+// loaded from it; otherwise the store is seeded with a default tenant carrying
+// the given routes. When path is set, mutations are mirrored back to the file.
+func New(path string, defaultAllowedIPs, defaultDNS []string) *Store {
+	s := &Store{tenants: map[string]*tenantState{}, path: path}
+	if path != "" {
+		if data, err := os.ReadFile(path); err == nil {
+			var loaded []Tenant
+			if json.Unmarshal(data, &loaded) == nil {
+				for _, t := range loaded {
+					s.tenants[t.ID] = &tenantState{t: t, subs: map[int]chan RouteSet{}}
+				}
+			}
+		}
+	}
+	if _, ok := s.tenants[DefaultID]; !ok {
+		s.tenants[DefaultID] = &tenantState{
+			t:    Tenant{ID: DefaultID, Name: "Default", AllowedIPs: defaultAllowedIPs, DNS: defaultDNS, Serial: 1},
+			subs: map[int]chan RouteSet{},
+		}
 	}
 	return s
 }
 
-// TenantIDForEmail returns the tenant whose domains include the email's domain,
-// or DefaultID.
-func (s *Store) TenantIDForEmail(email string) string {
-	at := strings.LastIndex(email, "@")
-	if at < 0 {
-		return DefaultID
-	}
-	domain := strings.ToLower(email[at+1:])
+// TenantsForEmail returns the tenants the user is a member of (invited to),
+// sorted by ID. Membership is by exact, case-insensitive email match.
+func (s *Store) TenantsForEmail(email string) []Tenant {
+	email = strings.ToLower(strings.TrimSpace(email))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id, st := range s.tenants {
-		for _, d := range st.t.Domains {
-			if strings.EqualFold(strings.TrimSpace(d), domain) {
-				return id
-			}
+	var out []Tenant
+	for _, st := range s.tenants {
+		if memberOf(st.t.Members, email) {
+			out = append(out, st.t)
 		}
 	}
-	return DefaultID
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// IsMember reports whether email is a member of the given tenant.
+func (s *Store) IsMember(tenantID, email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.tenants[tenantID]
+	if !ok {
+		return false
+	}
+	return memberOf(st.t.Members, email)
+}
+
+// memberOf reports whether email (already normalized) is in the member list.
+func memberOf(members []string, email string) bool {
+	for _, m := range members {
+		if strings.EqualFold(strings.TrimSpace(m), email) {
+			return true
+		}
+	}
+	return false
+}
+
+// saveLocked writes the current tenants to the configured file. The caller must
+// hold s.mu. No-op when persistence is disabled. Errors are returned so callers
+// can log them.
+func (s *Store) saveLocked() error {
+	if s.path == "" {
+		return nil
+	}
+	out := make([]Tenant, 0, len(s.tenants))
+	for _, st := range s.tenants {
+		out = append(out, st.t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.path)
 }
 
 // Routes returns the current route set for a tenant (default if unknown).
@@ -125,12 +187,15 @@ func (s *Store) Create(t Tenant) (Tenant, error) {
 	}
 	t.Serial = 1
 	s.tenants[t.ID] = &tenantState{t: t, subs: map[int]chan RouteSet{}}
+	if err := s.saveLocked(); err != nil {
+		return Tenant{}, err
+	}
 	return t, nil
 }
 
 // Update replaces a tenant's metadata and routes, bumps the serial, and pushes
 // the new route set to that tenant's watchers.
-func (s *Store) Update(id string, name string, domains, allowedIPs, dns []string) (Tenant, error) {
+func (s *Store) Update(id string, name string, domains, members, allowedIPs, dns []string) (Tenant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st, ok := s.tenants[id]
@@ -139,10 +204,14 @@ func (s *Store) Update(id string, name string, domains, allowedIPs, dns []string
 	}
 	st.t.Name = name
 	st.t.Domains = domains
+	st.t.Members = members
 	st.t.AllowedIPs = allowedIPs
 	st.t.DNS = dns
 	st.t.Serial++
 	s.broadcastLocked(st)
+	if err := s.saveLocked(); err != nil {
+		return Tenant{}, err
+	}
 	return st.t, nil
 }
 
@@ -161,7 +230,7 @@ func (s *Store) Delete(id string) error {
 		close(ch)
 	}
 	delete(s.tenants, id)
-	return nil
+	return s.saveLocked()
 }
 
 // Subscribe registers a watcher for a tenant; returns an id, a channel of future
