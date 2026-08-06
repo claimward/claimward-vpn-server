@@ -1,7 +1,7 @@
 # Binaries
 /bin/
 /dist/
-claimward-server
+/claimward-server
 *.test
 
 # Go
