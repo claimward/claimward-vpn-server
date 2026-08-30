@@ -24,7 +24,7 @@ require (
 )
 
 require (
-	github.com/claimward/claimward-vpn-client v0.0.0-20260611144032-9ecc63f38fc2
+	github.com/claimward/claimward-vpn-client v0.0.0-20260830075205-1e951d2ccf9f
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/josharian/native v1.1.0 // indirect
