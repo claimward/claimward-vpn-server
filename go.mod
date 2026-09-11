@@ -1,6 +1,6 @@
 module github.com/claimward/claimward-vpn-server
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
@@ -22,7 +22,7 @@ require (
 )
 
 require (
-	github.com/claimward/claimward-vpn-client v0.0.0-20260903115152-38c5e4190eee
+	github.com/claimward/claimward-vpn-client v0.0.0-20260910115821-0853fc44177d
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/josharian/native v1.1.0 // indirect
@@ -31,7 +31,7 @@ require (
 	github.com/mdlayher/socket v0.5.1 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/oauth2 v0.36.0 // indirect
+	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.zx2c4.com/wireguard v0.0.0-20260522210424-ecfc5a8d5446 // indirect
