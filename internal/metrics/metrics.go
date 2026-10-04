@@ -51,8 +51,8 @@ type collector struct {
 
 func newCollector(peers *store.Store, tenants *tenant.Store) *collector {
 	return &collector{
-		peers:   peers,
-		tenants: tenants,
+		peers:       peers,
+		tenants:     tenants,
 		tenantsDesc: prometheus.NewDesc("claimward_tenants", "Number of configured tenants.", nil, nil),
 		peersDesc:   prometheus.NewDesc("claimward_active_peers", "Number of currently enrolled peers.", nil, nil),
 		watchDesc:   prometheus.NewDesc("claimward_route_watchers", "Number of active gRPC route watchers.", nil, nil),
