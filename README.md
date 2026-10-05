@@ -2,8 +2,8 @@
 
 
 Control plane for the Claimward VPN. It authenticates devices against a
-pluggable identity provider — **GitHub** by default, or any **OIDC** issuer —
-and programs a **WireGuard** gateway, one peer per enrolled device.
+pluggable identity provider — **GitHub** by default, any **OIDC** issuer, or a
+**go-authn** provider — and programs a **WireGuard** gateway, one peer per enrolled device.
 
 Designed to run co-located on the Linux gateway host: it manages *peers* on an
 existing `wg0` interface via `wgctrl` (the interface itself is created by
@@ -24,20 +24,28 @@ shapes are defined in
 | `POST /api/v1/enroll` | Verify token, allocate an IP, add the WireGuard peer, return tunnel config |
 | `POST /api/v1/heartbeat` | Renew the device's lease |
 | `POST /api/v1/deregister` | Remove the peer |
+| `GET /api/v1/tenants` | The tenants the caller may connect to (see [Tenants](#tenants)) |
 | `GET /healthz` | Liveness |
+| `GET /metrics` | Prometheus exposition |
 
 ## Flow
 
 ```
 client --Bearer token + wg pubkey--> /enroll
-  ├─ verifier.Verify    resolve identity: GitHub API (+ org allowlist) or OIDC ID-token verification
+  ├─ verifier.Verify    resolve identity: GitHub API (+ org allowlist), OIDC ID token, or go-authn access token
+  ├─ registered         go-authn only: the key must be registered by the same subject (403 key_not_registered)
+  ├─ chooseTenant       the requested tenant, or the caller's only one (409 tenant_required, 403 not_a_member)
   ├─ ipam.Allocate      next free address from VPN_CIDR (server takes .1)
   ├─ wg.AddPeer         wgctrl: add peer with AllowedIPs = clientIP/32
   └─ store.Put          remember the lease
-client <-- assigned IP, server pubkey, endpoint, routes, DNS, keepalive --
+client <-- assigned IP, server pubkey, endpoint, the tenant's routes + DNS, gRPC endpoint, keepalive, lease expiry --
 ```
 
-A background reaper removes peers whose lease expired (no heartbeat).
+A background reaper (every minute) removes peers whose lease expired (no heartbeat).
+
+Leases and tenants are held **in memory**: a restart forgets every enrollment
+(devices re-enroll) and every tenant created through the admin API, leaving
+the `default` tenant seeded from `PUSH_ROUTES` and `DNS`.
 
 A key belongs to whoever enrolled it: enrolling a key another identity holds
 is refused (`409 key_taken`). A WireGuard public key is public, and before
@@ -67,7 +75,7 @@ The list comes from [go-authn/wireguard](https://github.com/go-authn/wireguard):
   back (the person or their institution disabled, or the device removed) is
   dropped from `wg0` at the next fetch, and its heartbeat is refused.
 - **Never older than one already seen**, which is the replay protection.
-- **Fail-closed:** a list past its five minutes admits nobody new, while
+- **Fail-closed:** a list past its expiry (its `exp`, set by the provider) admits nobody new, while
   tunnels already up end with their leases.
 - **Required at startup:** the first list is fetched before the server
   listens.
@@ -125,8 +133,8 @@ The admin API and WebUI edit the three membership lists beside the routes.
 | `AUTH_PROVIDER` | | `github` | identity provider: `github`, `oidc` or `go-authn` |
 | `GITHUB_ALLOWED_ORGS` | | — | CSV org-membership allowlist (github authz; recommended) |
 | `GITHUB_API_URL` | | `https://api.github.com` | set for GitHub Enterprise |
-| `OIDC_ISSUER` | when `oidc` | — | issuer URL (discovery) |
-| `OIDC_CLIENT_ID` | when `oidc` | — | expected token audience |
+| `OIDC_ISSUER` | when `oidc` or `go-authn` | — | issuer URL (discovery) |
+| `OIDC_CLIENT_ID` | when `oidc` or `go-authn` | — | expected token audience |
 | `OIDC_ALLOWED_DOMAINS` | | — | CSV email-domain allowlist (oidc authz) |
 | `GOAUTHN_GATEWAY_CLIENT_ID` | when `go-authn` | — | this gateway's own client at the go-authn provider (`wireguard_peers`) |
 | `GOAUTHN_GATEWAY_SECRET_FILE` | when `go-authn` | — | its secret, **from a file only** |
@@ -138,20 +146,23 @@ The admin API and WebUI edit the three membership lists beside the routes.
 | `WG_INTERFACE` | | `wg0` | kernel interface to manage |
 | `WG_DRYRUN` | | `false` | log peer ops instead of applying — local dev |
 | `VPN_CIDR` | | `10.80.0.0/24` | address pool; `.1` is the gateway |
-| `PUSH_ROUTES` | | `VPN_CIDR` | CSV AllowedIPs pushed to clients |
-| `DNS` | | — | CSV DNS servers pushed to clients |
+| `PUSH_ROUTES` | | `VPN_CIDR` | CSV AllowedIPs of the `default` tenant |
+| `DNS` | | — | CSV DNS servers of the `default` tenant |
 | `KEEPALIVE` | | `25` | persistent keepalive (seconds) |
 | `LEASE_TTL` | | `24h` | lease duration without heartbeat |
 | `LISTEN_ADDR` | | `:8443` | HTTP control-plane listen address |
 | `GRPC_ADDR` | | `:8444` | RouteService gRPC listen address |
 | `GRPC_ENDPOINT` | | — | `host:port` advertised to clients for route streaming |
 | `ADMIN_TOKEN` | | — | bearer for the admin API/WebUI; empty disables admin |
+| `DEBUG` | | — | any value enables debug logging |
 | `TLS_CERT` / `TLS_KEY` | | — | enable HTTPS **and TLS on the gRPC RouteService**. A route watch carries the bearer token, and claimward clients refuse a plaintext one except on loopback; without these, devices connect but get no live route updates |
 
 ## Run locally (no WireGuard device needed)
 
 The server is assembled and started from `cmd/claimward-server` (see
-`Taskfile.yml` — `task start`). With `WG_DRYRUN=true` no real WireGuard device
+`Taskfile.yml` — `task run`, or `task run:dev` for a dry run on `:8080` with an
+ephemeral key, `task dex` + `task run:dev:oidc` against a local Dex, see
+[`deploy/dev`](deploy/dev/README.md)). With `WG_DRYRUN=true` no real WireGuard device
 is touched:
 
 ```sh
