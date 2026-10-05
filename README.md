@@ -146,7 +146,7 @@ The admin API and WebUI edit the three membership lists beside the routes.
 | `GRPC_ADDR` | | `:8444` | RouteService gRPC listen address |
 | `GRPC_ENDPOINT` | | — | `host:port` advertised to clients for route streaming |
 | `ADMIN_TOKEN` | | — | bearer for the admin API/WebUI; empty disables admin |
-| `TLS_CERT` / `TLS_KEY` | | — | enable HTTPS; otherwise terminate TLS at a proxy |
+| `TLS_CERT` / `TLS_KEY` | | — | enable HTTPS **and TLS on the gRPC RouteService**. A route watch carries the bearer token, and claimward clients refuse a plaintext one except on loopback; without these, devices connect but get no live route updates |
 
 ## Run locally (no WireGuard device needed)
 

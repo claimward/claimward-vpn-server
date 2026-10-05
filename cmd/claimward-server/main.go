@@ -23,6 +23,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -48,6 +49,7 @@ import (
 	"github.com/go-authn/wireguard"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 func main() {
@@ -142,7 +144,14 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	gs := grpc.NewServer(grpc.StreamInterceptor(grpcsrv.AuthStreamInterceptor(verifier)))
+	opts, secure, err := grpcOptions(cfg.TLSCert, cfg.TLSKey)
+	if err != nil {
+		return err
+	}
+	if !secure {
+		log.Warn("gRPC RouteService without TLS: clients send their bearer token in it, and refuse to except on loopback -- set TLS_CERT/TLS_KEY")
+	}
+	gs := grpc.NewServer(append(opts, grpc.StreamInterceptor(grpcsrv.AuthStreamInterceptor(verifier)))...)
 	routespb.RegisterRouteServiceServer(gs, grpcsrv.New(ts, st))
 	go gs.Serve(grpcLn) //nolint:errcheck
 	go func() {
@@ -210,4 +219,18 @@ func logLevel() slog.Level {
 		return slog.LevelDebug
 	}
 	return slog.LevelInfo
+}
+
+// grpcOptions serves the RouteService over TLS when the server has a
+// certificate. A watch carries the person's bearer token in its metadata,
+// and claimward clients refuse a plaintext watch except on loopback.
+func grpcOptions(certFile, keyFile string) ([]grpc.ServerOption, bool, error) {
+	if certFile == "" || keyFile == "" {
+		return nil, false, nil
+	}
+	creds, err := credentials.NewServerTLSFromFile(certFile, keyFile)
+	if err != nil {
+		return nil, false, fmt.Errorf("gRPC TLS: %w", err)
+	}
+	return []grpc.ServerOption{grpc.Creds(creds)}, true, nil
 }
