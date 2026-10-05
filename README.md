@@ -71,6 +71,12 @@ The list comes from [go-authn/wireguard](https://github.com/go-authn/wireguard):
   tunnels already up end with their leases.
 - **Required at startup:** the first list is fetched before the server
   listens.
+- **Refetched at once on a disabling,** with `GOAUTHN_SSF=true`: the gateway
+  also polls the provider's Shared Signals stream (SSF 1.0, RFC 8936), reusing
+  one stream rather than one per start. An event is a **trigger, never a
+  decision**: it makes the list be read sooner, and the signed list alone says
+  what may connect. A forged event therefore buys one extra fetch and nothing
+  else, which is why events are not verified.
 
 Only **access tokens** (`typ: at+jwt`, RFC 9068 §4) addressed to this server
 are accepted, never an ID token. An email address is used for tenant mapping
@@ -104,6 +110,8 @@ streams the routes for a client's tenant.
 | `GOAUTHN_GATEWAY_CLIENT_ID` | when `go-authn` | — | this gateway's own client at the go-authn provider (`wireguard_peers`) |
 | `GOAUTHN_GATEWAY_SECRET_FILE` | when `go-authn` | — | its secret, **from a file only** |
 | `GOAUTHN_PEER_LIST_INTERVAL` | | `30s` | how often the list of registered keys is fetched |
+| `GOAUTHN_SSF` | | `false` | also listen to the provider's Shared Signals (poll), so a disabling is acted on at once; the gateway's client must be an SSF receiver there |
+| `GOAUTHN_SSF_INTERVAL` | | `5s` | how often the SSF stream is polled |
 | `WG_ENDPOINT` | ✅ | — | public `host:port` advertised to clients |
 | `WG_PRIVATE_KEY` / `WG_PRIVATE_KEY_FILE` | ✅ | — | base64 server key |
 | `WG_INTERFACE` | | `wg0` | kernel interface to manage |

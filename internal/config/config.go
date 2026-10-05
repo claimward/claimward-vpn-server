@@ -32,6 +32,11 @@ type Config struct {
 	GatewayClientID  string
 	GatewaySecret    string        // filled from GOAUTHN_GATEWAY_SECRET_FILE
 	PeerListInterval time.Duration // how often the list is fetched
+	// SSF makes the gateway also listen to the provider's Shared Signals,
+	// so that a disabling is acted on at once rather than at the next fetch.
+	// The gateway's client must be an SSF receiver at the provider.
+	SSF         bool
+	SSFInterval time.Duration
 
 	GitHubAPIURL      string   // default https://api.github.com (set for GHE)
 	GitHubAllowedOrgs []string // optional org-membership allowlist (github)
@@ -75,6 +80,8 @@ func Load() (*Config, error) {
 		LeaseTTL:          durEnv("LEASE_TTL", 24*time.Hour),
 		GatewayClientID:   os.Getenv("GOAUTHN_GATEWAY_CLIENT_ID"),
 		PeerListInterval:  durEnv("GOAUTHN_PEER_LIST_INTERVAL", 30*time.Second),
+		SSF:               boolEnv("GOAUTHN_SSF", false),
+		SSFInterval:       durEnv("GOAUTHN_SSF_INTERVAL", 5*time.Second),
 	}
 
 	if file := os.Getenv("WG_PRIVATE_KEY_FILE"); file != "" && c.WGPrivateKey == "" {
