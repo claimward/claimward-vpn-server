@@ -38,6 +38,11 @@ client <-- assigned IP, server pubkey, endpoint, routes, DNS, keepalive --
 
 A background reaper removes peers whose lease expired (no heartbeat).
 
+A key belongs to whoever enrolled it: enrolling a key another identity holds
+is refused (`409 key_taken`). A WireGuard public key is public, and before
+this an enrollment under another identity took the key over, and with it the
+power to deregister its owner's device.
+
 ## Other surfaces
 
 Beyond the enrollment API, the server exposes:

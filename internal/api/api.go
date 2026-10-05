@@ -92,6 +92,15 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	// Reuse the existing assignment if this device is already enrolled.
 	var ip net.IP
 	if existing := s.store.Get(req.PublicKey); existing != nil {
+		// ⛔ A public key is public: anybody can read one off a peer list or
+		// a configuration. Enrolling it again under another identity used to
+		// make that identity its owner -- and the owner may deregister it --
+		// so a key stays with whoever enrolled it, as heartbeat and
+		// deregister already assumed.
+		if existing.Subject != claims.Subject {
+			writeErr(w, http.StatusConflict, "key_taken", "this key is enrolled by another user")
+			return
+		}
 		ip = existing.IP
 	} else {
 		ip, err = s.alloc.Allocate()
