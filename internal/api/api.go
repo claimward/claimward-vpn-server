@@ -98,6 +98,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST "+protocol.PathEnroll, s.authenticated(s.handleEnroll))
 	mux.Handle("POST "+protocol.PathHeartbeat, s.authenticated(s.handleHeartbeat))
 	mux.Handle("POST "+protocol.PathDeregister, s.authenticated(s.handleDeregister))
+	mux.Handle("GET "+protocol.PathTenants, s.authenticated(s.handleTenants))
 	return s.withLogging(mux)
 }
 
@@ -122,6 +123,42 @@ func (s *Server) authenticated(next func(http.ResponseWriter, *http.Request, *au
 	})
 }
 
+// handleTenants lists the tenants the caller may connect to, for a client to
+// offer the choice.
+func (s *Server) handleTenants(w http.ResponseWriter, _ *http.Request, claims *auth.Claims) {
+	ts := s.tenants.For(claims.Tenancy())
+	out := make([]protocol.TenantInfo, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, protocol.TenantInfo{ID: t.ID, Name: t.Name})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// chooseTenant is the tenant an enrollment is for: the one asked for, if the
+// caller is a member; with none asked for, the caller's only tenant. A
+// person in several must choose -- connecting them to one picked here would
+// route them into a network they did not ask for. A non-zero code is the
+// refusal, with its error code and message.
+func (s *Server) chooseTenant(asked string, claims *auth.Claims) (string, int, [2]string) {
+	ts := s.tenants.For(claims.Tenancy())
+	if asked == "" {
+		if len(ts) == 1 {
+			return ts[0].ID, 0, [2]string{}
+		}
+		ids := make([]string, 0, len(ts))
+		for _, t := range ts {
+			ids = append(ids, t.ID)
+		}
+		return "", http.StatusConflict, [2]string{"tenant_required", "you belong to several tenants; choose one of: " + strings.Join(ids, ", ")}
+	}
+	for _, t := range ts {
+		if t.ID == asked {
+			return asked, 0, [2]string{}
+		}
+	}
+	return "", http.StatusForbidden, [2]string{"not_a_member", "you are not a member of tenant " + asked}
+}
+
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -140,6 +177,11 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	expiry, ok := s.registered(req.PublicKey, claims, time.Now().Add(s.cfg.LeaseTTL))
 	if !ok {
 		writeErr(w, http.StatusForbidden, "key_not_registered", "register this device's key with the identity provider first")
+		return
+	}
+	tenantID, code, why := s.chooseTenant(req.Tenant, claims)
+	if code != 0 {
+		writeErr(w, code, why[0], why[1])
 		return
 	}
 
@@ -179,10 +221,10 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 		Device:      req.Device,
 		EnrolledAt:  time.Now(),
 		LeaseExpiry: expiry,
+		Tenant:      tenantID,
 	})
 	s.log.Info("enrolled", "email", claims.Email, "ip", ip.String(), "device", req.Device.Name, "platform", req.Device.Platform)
 
-	tenantID := s.tenants.TenantIDForEmail(claims.Email)
 	rs := s.tenants.Routes(tenantID)
 	s.metrics.EnrollInc(tenantID)
 	s.log.Info("enrolled tenant routes", "tenant", tenantID, "email", claims.Email, "routes", rs.AllowedIPs)
@@ -206,6 +248,12 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, claims 
 	peer := s.store.Get(req.PublicKey)
 	if peer == nil || peer.Subject != claims.Subject {
 		writeErr(w, http.StatusNotFound, "not_enrolled", "no active enrollment for this key")
+		return
+	}
+	// A person removed from the tenant -- a group, a domain, an institution
+	// taken off it -- renews nothing in it.
+	if !s.tenants.IsMember(peer.Tenant, claims.Tenancy()) {
+		writeErr(w, http.StatusForbidden, "not_a_member", "you are no longer a member of this tenant")
 		return
 	}
 	// A lease is renewed only while the key is still registered, and never

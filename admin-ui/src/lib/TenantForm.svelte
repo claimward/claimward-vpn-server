@@ -7,6 +7,8 @@
   let id = $state(tenant?.id ?? '')
   let name = $state(tenant?.name ?? '')
   let domains = $state((tenant?.domains ?? []).join(', '))
+  let groups = $state((tenant?.groups ?? []).join(', '))
+  let idps = $state((tenant?.idps ?? []).join(', '))
   let allowedIps = $state((tenant?.allowed_ips ?? []).join(', '))
   let dns = $state((tenant?.dns ?? []).join(', '))
   let saving = $state(false)
@@ -24,6 +26,8 @@
         id: id.trim(),
         name: name.trim(),
         domains: list(domains),
+        groups: list(groups),
+        idps: list(idps),
         allowed_ips: list(allowedIps),
         dns: list(dns),
       })
@@ -65,11 +69,29 @@
     </div>
 
     <label class="form-control">
-      <span class="label-text mb-1 text-xs opacity-70">Email domains (comma-separated)</span>
+      <span class="label-text mb-1 text-xs opacity-70">Members by verified email domain (comma-separated)</span>
       <input
         class="input input-bordered input-sm font-mono"
         bind:value={domains}
         placeholder="acme.com, acme.io"
+      />
+    </label>
+
+    <label class="form-control">
+      <span class="label-text mb-1 text-xs opacity-70">Members by group: the token's groups, GitHub organisations (comma-separated)</span>
+      <input
+        class="input input-bordered input-sm font-mono"
+        bind:value={groups}
+        placeholder="urn:mace:univ-a.fr:entitlement:hpc, acme-org"
+      />
+    </label>
+
+    <label class="form-control">
+      <span class="label-text mb-1 text-xs opacity-70">Members by institution: go-authn IdP entity IDs (comma-separated)</span>
+      <input
+        class="input input-bordered input-sm font-mono"
+        bind:value={idps}
+        placeholder="https://idp.univ-a.fr/idp/shibboleth"
       />
     </label>
 

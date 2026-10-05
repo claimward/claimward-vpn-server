@@ -53,6 +53,18 @@ func (v *GitHubVerifier) Verify(ctx context.Context, token string) (*Claims, err
 		Email:         user.Email,
 		EmailVerified: user.Email != "", // GitHub only exposes verified emails on /user
 	}
+	// The organisations are the person's groups, for tenant membership:
+	// /user/orgs lists the ones the token may see (read:org shows private
+	// memberships too).
+	var orgs []struct {
+		Login string `json:"login"`
+	}
+	if err := v.get(ctx, token, "/user/orgs", &orgs); err != nil {
+		return nil, fmt.Errorf("listing the GitHub organisations: %w", err)
+	}
+	for _, o := range orgs {
+		claims.Groups = append(claims.Groups, o.Login)
+	}
 
 	if len(v.allowedOrgs) > 0 {
 		ok, err := v.inAllowedOrg(ctx, token, user.Login)

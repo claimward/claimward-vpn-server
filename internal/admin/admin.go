@@ -108,7 +108,7 @@ func (s *Server) updateTenant(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	t, err := s.tenants.Update(r.PathValue("id"), in.Name, in.Domains, in.AllowedIPs, in.DNS)
+	t, err := s.tenants.Update(r.PathValue("id"), in)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return

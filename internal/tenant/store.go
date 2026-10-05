@@ -1,7 +1,12 @@
 // Package tenant is the multi-tenant route store: each tenant owns a set of
 // WireGuard routes (AllowedIPs/DNS) and a broadcast channel so gRPC watchers of
-// that tenant get pushed updates. Clients are mapped to a tenant by the email
-// domain of their OIDC identity, falling back to the default tenant.
+// that tenant get pushed updates.
+//
+// A person may belong to several tenants, and chooses one per session (the
+// enrollment names it). Membership is by any of: the verified email's domain,
+// a group the identity provider says they are in, or the institution that
+// vouched for them (a go-authn provider's "idp"). Somebody who matches no
+// tenant belongs to the default one, and only then.
 //
 // State is in-memory (MVP), mirroring the rest of the server.
 package tenant
@@ -20,7 +25,9 @@ const DefaultID = "default"
 type Tenant struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
-	Domains    []string `json:"domains"` // email domains mapped to this tenant
+	Domains    []string `json:"domains"` // verified email domains that are members
+	Groups     []string `json:"groups"`  // groups (token "groups" claim, GitHub orgs) that are members
+	IdPs       []string `json:"idps"`    // institutions (go-authn "idp", a SAML entity ID) that are members
 	AllowedIPs []string `json:"allowed_ips"`
 	DNS        []string `json:"dns"`
 	Serial     uint64   `json:"serial"`
@@ -55,24 +62,73 @@ func New(defaultAllowedIPs, defaultDNS []string) *Store {
 	return s
 }
 
-// TenantIDForEmail returns the tenant whose domains include the email's domain,
-// or DefaultID.
-func (s *Store) TenantIDForEmail(email string) string {
-	at := strings.LastIndex(email, "@")
-	if at < 0 {
-		return DefaultID
-	}
-	domain := strings.ToLower(email[at+1:])
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, st := range s.tenants {
-		for _, d := range st.t.Domains {
-			if strings.EqualFold(strings.TrimSpace(d), domain) {
-				return id
+// Member is what tenants are matched on: who somebody is, as their token says.
+type Member struct {
+	Email         string
+	EmailVerified bool
+	Groups        []string
+	IdP           string
+}
+
+// has is whether m belongs to t.
+//
+// ⛔ Only a VERIFIED address's domain counts: an unverified one is a string
+// the person typed, and typing somebody else's domain would be joining their
+// tenant.
+func (t Tenant) has(m Member) bool {
+	if m.EmailVerified {
+		if at := strings.LastIndex(m.Email, "@"); at >= 0 {
+			domain := m.Email[at+1:]
+			for _, d := range t.Domains {
+				if strings.EqualFold(strings.TrimSpace(d), domain) {
+					return true
+				}
 			}
 		}
 	}
-	return DefaultID
+	for _, g := range t.Groups {
+		for _, mg := range m.Groups {
+			if strings.TrimSpace(g) != "" && strings.TrimSpace(g) == mg {
+				return true
+			}
+		}
+	}
+	if m.IdP != "" {
+		for _, idp := range t.IdPs {
+			if strings.TrimSpace(idp) == m.IdP {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// For is every tenant m belongs to, by ID; the default tenant alone when m
+// matches none.
+func (s *Store) For(m Member) []Tenant {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Tenant
+	for _, st := range s.tenants {
+		if st.t.has(m) {
+			out = append(out, st.t)
+		}
+	}
+	if len(out) == 0 {
+		return []Tenant{s.tenants[DefaultID].t}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// IsMember is whether m may connect to tenant id.
+func (s *Store) IsMember(id string, m Member) bool {
+	for _, t := range s.For(m) {
+		if t.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // Routes returns the current route set for a tenant (default if unknown).
@@ -130,17 +186,19 @@ func (s *Store) Create(t Tenant) (Tenant, error) {
 
 // Update replaces a tenant's metadata and routes, bumps the serial, and pushes
 // the new route set to that tenant's watchers.
-func (s *Store) Update(id string, name string, domains, allowedIPs, dns []string) (Tenant, error) {
+func (s *Store) Update(id string, in Tenant) (Tenant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st, ok := s.tenants[id]
 	if !ok {
 		return Tenant{}, fmt.Errorf("tenant %q not found", id)
 	}
-	st.t.Name = name
-	st.t.Domains = domains
-	st.t.AllowedIPs = allowedIPs
-	st.t.DNS = dns
+	st.t.Name = in.Name
+	st.t.Domains = in.Domains
+	st.t.Groups = in.Groups
+	st.t.IdPs = in.IdPs
+	st.t.AllowedIPs = in.AllowedIPs
+	st.t.DNS = in.DNS
 	st.t.Serial++
 	s.broadcastLocked(st)
 	return st.t, nil

@@ -167,7 +167,7 @@
               <tr>
                 <th>ID</th>
                 <th>Name</th>
-                <th>Domains</th>
+                <th>Members (domains, groups, institutions)</th>
                 <th>AllowedIPs</th>
                 <th>DNS</th>
                 <th class="text-right">Serial</th>
@@ -191,7 +191,7 @@
                       {/if}
                     </td>
                     <td>{t.name}</td>
-                    <td class="font-mono text-xs opacity-80">{(t.domains ?? []).join(', ') || '—'}</td>
+                    <td class="font-mono text-xs opacity-80">{[...(t.domains ?? []), ...(t.groups ?? []), ...(t.idps ?? [])].join(', ') || '—'}</td>
                     <td class="font-mono text-xs opacity-80">{(t.allowed_ips ?? []).join(', ') || '—'}</td>
                     <td class="font-mono text-xs opacity-80">{(t.dns ?? []).join(', ') || '—'}</td>
                     <td class="text-right font-mono text-sm">{t.serial}</td>

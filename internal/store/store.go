@@ -18,6 +18,9 @@ type Peer struct {
 	Device      protocol.DeviceInfo
 	EnrolledAt  time.Time
 	LeaseExpiry time.Time
+	// Tenant is the tenant chosen for this session: the routes it gets, and
+	// the membership heartbeats are checked against.
+	Tenant string
 }
 
 // Store is an in-memory peer registry, safe for concurrent use.
