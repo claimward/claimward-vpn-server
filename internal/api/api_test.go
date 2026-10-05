@@ -20,6 +20,7 @@ import (
 	"github.com/claimward/claimward-vpn-server/internal/store"
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
 	"github.com/claimward/claimward-vpn-server/internal/wg"
+	"github.com/go-authn/wireguard"
 )
 
 // tokens is a verifier whose bearer tokens are the people's names.
@@ -87,5 +88,78 @@ func TestAnEnrolledKeyStaysWithItsOwner(t *testing.T) {
 	}
 	if w := call(t, h, protocol.PathHeartbeat, "alice", protocol.HeartbeatRequest{PublicKey: aliceKey}); w.Code != http.StatusOK {
 		t.Errorf("alice's heartbeat: %d", w.Code)
+	}
+}
+
+// fixed is a registry with a fixed list.
+type fixed map[string]wireguard.Peer
+
+func (f fixed) Lookup(key string) (wireguard.Peer, bool) {
+	p, ok := f[key]
+	return p, ok && time.Now().Before(p.Expires)
+}
+
+func (f fixed) allowed(key, sub string) bool {
+	p, ok := f.Lookup(key)
+	return ok && p.Subject == sub
+}
+
+func mustKey(t *testing.T, s string) wireguard.Key {
+	t.Helper()
+	k, err := wireguard.ParseKey(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// With a go-authn provider a valid token is not enough: the key must be one
+// its owner registered there, and the lease never outlives the registration.
+func TestOnlyARegisteredKeyIsEnrolled(t *testing.T) {
+	s, st := newServer(t)
+	h := s.Handler()
+	until := time.Now().Add(20 * time.Minute).Truncate(time.Second)
+	reg := fixed{aliceKey: {Key: mustKey(t, aliceKey), Subject: "sub-alice", Expires: until}}
+	s.UsePeers(reg)
+
+	const unregistered = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
+	if w := call(t, h, protocol.PathEnroll, "alice", protocol.EnrollRequest{PublicKey: unregistered}); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "key_not_registered") {
+		t.Errorf("a key nobody registered: %d %s", w.Code, w.Body)
+	}
+	if w := call(t, h, protocol.PathEnroll, "bob", protocol.EnrollRequest{PublicKey: aliceKey}); w.Code != http.StatusForbidden {
+		t.Errorf("bob enrolling the key alice registered: %d %s", w.Code, w.Body)
+	}
+	w := call(t, h, protocol.PathEnroll, "alice", protocol.EnrollRequest{PublicKey: aliceKey})
+	if w.Code != http.StatusOK {
+		t.Fatalf("alice enrolling her registered key: %d %s", w.Code, w.Body)
+	}
+	var resp protocol.EnrollResponse
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.LeaseExpiresAt.Equal(until) {
+		t.Errorf("the lease ends %v, want the registration's %v (LEASE_TTL is an hour)", resp.LeaseExpiresAt, until)
+	}
+	if p := st.Get(aliceKey); p == nil || !p.LeaseExpiry.Equal(until) {
+		t.Errorf("the stored lease: %+v", p)
+	}
+
+	// The provider takes the key back: a heartbeat is refused, and the next
+	// reconciliation drops the peer.
+	delete(reg, aliceKey)
+	if w := call(t, h, protocol.PathHeartbeat, "alice", protocol.HeartbeatRequest{PublicKey: aliceKey}); w.Code != http.StatusForbidden {
+		t.Errorf("a heartbeat for a key taken back: %d", w.Code)
+	}
+	s.Reconcile(reg.allowed)
+	if p := st.Get(aliceKey); p != nil {
+		t.Errorf("the peer outlived its key: %+v", p)
+	}
+	// Its address is free again.
+	reg[aliceKey] = wireguard.Peer{Key: mustKey(t, aliceKey), Subject: "sub-alice", Expires: until}
+	if w := call(t, h, protocol.PathEnroll, "alice", protocol.EnrollRequest{PublicKey: aliceKey}); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), resp.AssignedIP) {
+		t.Errorf("enrolling again: %d %s (the address was %s)", w.Code, w.Body, resp.AssignedIP)
+	}
+	// A reconciliation that allows everything keeps everything.
+	s.Reconcile(func(string, string) bool { return true })
+	if st.Get(aliceKey) == nil {
+		t.Error("a reconciliation that allowed the peer dropped it")
 	}
 }

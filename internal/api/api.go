@@ -20,6 +20,7 @@ import (
 	"github.com/claimward/claimward-vpn-server/internal/store"
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
 	"github.com/claimward/claimward-vpn-server/internal/wg"
+	"github.com/go-authn/wireguard"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
@@ -34,6 +35,55 @@ type Server struct {
 	metrics      *metrics.Metrics
 	serverPubKey string
 	log          *slog.Logger
+
+	// peers, when set, is the provider's list of registered keys: a key is
+	// enrolled only if its owner registered it there (AUTH_PROVIDER=go-authn).
+	peers Registry
+}
+
+// Registry says whose a WireGuard key is, and until when -- the go-authn
+// provider's list (internal/peers).
+type Registry interface {
+	Lookup(key string) (wireguard.Peer, bool)
+}
+
+// UsePeers makes enrollment depend on reg: a key must be registered there,
+// by the person enrolling it.
+func (s *Server) UsePeers(reg Registry) { s.peers = reg }
+
+// registered is whether the key may be enrolled by claims' subject, and the
+// latest its lease may run to. Without a registry every key may, until the
+// lease TTL.
+func (s *Server) registered(key string, claims *auth.Claims, lease time.Time) (time.Time, bool) {
+	if s.peers == nil {
+		return lease, true
+	}
+	p, ok := s.peers.Lookup(key)
+	if !ok || p.Subject != claims.Subject {
+		return time.Time{}, false
+	}
+	if p.Expires.Before(lease) {
+		lease = p.Expires
+	}
+	return lease, true
+}
+
+// Reconcile drops every enrolled peer allowed no longer: a key the provider
+// took back, or one now registered to somebody else.
+func (s *Server) Reconcile(allowed func(key, subject string) bool) {
+	for _, p := range s.store.List() {
+		if allowed(p.PublicKey, p.Subject) {
+			continue
+		}
+		if pub, err := wgtypes.ParseKey(p.PublicKey); err == nil {
+			if err := s.gw.RemovePeer(pub); err != nil {
+				s.log.Error("reconcile remove peer failed", "err", err)
+			}
+		}
+		s.store.Delete(p.PublicKey)
+		s.alloc.Release(p.IP)
+		s.log.Info("key no longer registered, peer removed", "email", p.Email, "ip", p.IP.String())
+	}
 }
 
 // New builds the API server.
@@ -87,7 +137,11 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 		return
 	}
 
-	expiry := time.Now().Add(s.cfg.LeaseTTL)
+	expiry, ok := s.registered(req.PublicKey, claims, time.Now().Add(s.cfg.LeaseTTL))
+	if !ok {
+		writeErr(w, http.StatusForbidden, "key_not_registered", "register this device's key with the identity provider first")
+		return
+	}
 
 	// Reuse the existing assignment if this device is already enrolled.
 	var ip net.IP
@@ -154,7 +208,13 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, claims 
 		writeErr(w, http.StatusNotFound, "not_enrolled", "no active enrollment for this key")
 		return
 	}
-	expiry := time.Now().Add(s.cfg.LeaseTTL)
+	// A lease is renewed only while the key is still registered, and never
+	// past its registration.
+	expiry, ok := s.registered(req.PublicKey, claims, time.Now().Add(s.cfg.LeaseTTL))
+	if !ok {
+		writeErr(w, http.StatusForbidden, "key_not_registered", "this device's key is no longer registered with the identity provider")
+		return
+	}
 	s.store.Renew(req.PublicKey, expiry)
 	writeJSON(w, http.StatusOK, protocol.HeartbeatResponse{LeaseExpiresAt: expiry})
 }

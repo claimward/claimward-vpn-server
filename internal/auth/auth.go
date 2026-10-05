@@ -6,6 +6,9 @@
 //   - github (default): the bearer is a GitHub OAuth access token; it is validated
 //     by calling the GitHub API, with optional org-membership authorization.
 //   - oidc: the bearer is an OIDC ID token; it is verified against the issuer.
+//   - go-authn: the bearer is an access token (at+jwt) from a go-authn
+//     provider, and the device's WireGuard key must be one the person
+//     registered there (internal/peers).
 //
 // Add a provider by implementing Verifier and wiring it into New.
 package auth
@@ -32,7 +35,7 @@ type Verifier interface {
 
 // Options configures the verifier factory. Fields are provider-specific.
 type Options struct {
-	Provider string // "github" (default) or "oidc"
+	Provider string // "github" (default), "oidc" or "go-authn"
 
 	// OIDC
 	Issuer         string
@@ -51,7 +54,9 @@ func New(ctx context.Context, opts Options) (Verifier, error) {
 		return NewGitHubVerifier(opts.GitHubAPIURL, opts.GitHubAllowedOrgs), nil
 	case "oidc":
 		return NewOIDCVerifier(ctx, opts.Issuer, opts.ClientID, opts.AllowedDomains)
+	case "go-authn":
+		return NewGoAuthnVerifier(ctx, opts.Issuer, opts.ClientID)
 	default:
-		return nil, fmt.Errorf("unknown AUTH_PROVIDER %q (want \"github\" or \"oidc\")", opts.Provider)
+		return nil, fmt.Errorf("unknown AUTH_PROVIDER %q (want \"github\", \"oidc\" or \"go-authn\")", opts.Provider)
 	}
 }

@@ -26,6 +26,13 @@ type Config struct {
 	OIDCClientID   string   // required when AuthProvider == "oidc" (token audience)
 	AllowedDomains []string // optional email-domain allowlist for authz (oidc)
 
+	// go-authn: the gateway's own client at the provider, which reads the
+	// list of registered WireGuard keys. The secret is read from a file
+	// only: an environment is copied into every child and every crash dump.
+	GatewayClientID  string
+	GatewaySecret    string        // filled from GOAUTHN_GATEWAY_SECRET_FILE
+	PeerListInterval time.Duration // how often the list is fetched
+
 	GitHubAPIURL      string   // default https://api.github.com (set for GHE)
 	GitHubAllowedOrgs []string // optional org-membership allowlist (github)
 
@@ -66,6 +73,8 @@ func Load() (*Config, error) {
 		DNS:               splitCSV(os.Getenv("DNS")),
 		Keepalive:         intEnv("KEEPALIVE", 25),
 		LeaseTTL:          durEnv("LEASE_TTL", 24*time.Hour),
+		GatewayClientID:   os.Getenv("GOAUTHN_GATEWAY_CLIENT_ID"),
+		PeerListInterval:  durEnv("GOAUTHN_PEER_LIST_INTERVAL", 30*time.Second),
 	}
 
 	if file := os.Getenv("WG_PRIVATE_KEY_FILE"); file != "" && c.WGPrivateKey == "" {
@@ -89,8 +98,27 @@ func Load() (*Config, error) {
 	case "oidc":
 		required["OIDC_ISSUER"] = c.OIDCIssuer
 		required["OIDC_CLIENT_ID"] = c.OIDCClientID
+	case "go-authn":
+		required["OIDC_ISSUER"] = c.OIDCIssuer
+		required["OIDC_CLIENT_ID"] = c.OIDCClientID
+		required["GOAUTHN_GATEWAY_CLIENT_ID"] = c.GatewayClientID
+		file := os.Getenv("GOAUTHN_GATEWAY_SECRET_FILE")
+		required["GOAUTHN_GATEWAY_SECRET_FILE"] = file
+		if file != "" {
+			b, err := os.ReadFile(file)
+			if err != nil {
+				return nil, fmt.Errorf("read GOAUTHN_GATEWAY_SECRET_FILE: %w", err)
+			}
+			c.GatewaySecret = strings.TrimSpace(string(b))
+			if c.GatewaySecret == "" {
+				return nil, fmt.Errorf("GOAUTHN_GATEWAY_SECRET_FILE %s is empty", file)
+			}
+		}
+		if c.PeerListInterval <= 0 {
+			return nil, fmt.Errorf("GOAUTHN_PEER_LIST_INTERVAL must be positive")
+		}
 	default:
-		return nil, fmt.Errorf("invalid AUTH_PROVIDER %q (want \"github\" or \"oidc\")", c.AuthProvider)
+		return nil, fmt.Errorf("invalid AUTH_PROVIDER %q (want \"github\", \"oidc\" or \"go-authn\")", c.AuthProvider)
 	}
 
 	var missing []string

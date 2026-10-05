@@ -13,7 +13,8 @@ wg-quick/systemd at boot).
 
 Enrollment requests carry the user's bearer credential as
 `Authorization: Bearer <token>` — a **GitHub OAuth access token** (default
-provider) or an **OIDC ID token** (`AUTH_PROVIDER=oidc`). Request/response
+provider), an **OIDC ID token** (`AUTH_PROVIDER=oidc`), or a go-authn
+**access token** (`AUTH_PROVIDER=go-authn`, see [With go-authn](#with-go-authn)). Request/response
 shapes are defined in
 [`claimward-vpn-client/pkg/protocol`](https://github.com/claimward/claimward-vpn-client/tree/main/pkg/protocol)
 — the single shared source of truth.
@@ -43,6 +44,38 @@ is refused (`409 key_taken`). A WireGuard public key is public, and before
 this an enrollment under another identity took the key over, and with it the
 power to deregister its owner's device.
 
+## With go-authn
+
+With `AUTH_PROVIDER=go-authn`, [go-authn/bridge](https://github.com/go-authn/bridge)
+is the identity provider: an OpenID Connect provider in front of a SAML
+federation (RENATER, eduGAIN), which also keeps **whose each WireGuard key
+is**. A valid token is no longer enough to enroll:
+
+1. the client logs in once at the provider (device flow, scope
+   `openid wireguard`) and registers its device's **public** key there
+   (`POST /wireguard/key`). The private key never leaves the device;
+2. it refreshes for `scope=openid`, which gives an access token addressed to
+   this server (`OIDC_CLIENT_ID`), and calls `/api/v1/enroll` with it;
+3. the server enrolls the key only if the provider's list has it **registered
+   by the same subject**. Otherwise it answers `403 key_not_registered`. A
+   lease never outlives the key's registration.
+
+The list comes from [go-authn/wireguard](https://github.com/go-authn/wireguard):
+- **Fetched with the gateway's own credentials**, signed by the provider for
+  this gateway alone.
+- **Refetched every `GOAUTHN_PEER_LIST_INTERVAL`.** A key the provider takes
+  back (the person or their institution disabled, or the device removed) is
+  dropped from `wg0` at the next fetch, and its heartbeat is refused.
+- **Never older than one already seen**, which is the replay protection.
+- **Fail-closed:** a list past its five minutes admits nobody new, while
+  tunnels already up end with their leases.
+- **Required at startup:** the first list is fetched before the server
+  listens.
+
+Only **access tokens** (`typ: at+jwt`, RFC 9068 §4) addressed to this server
+are accepted, never an ID token. An email address is used for tenant mapping
+only when the provider verified it.
+
 ## Other surfaces
 
 Beyond the enrollment API, the server exposes:
@@ -62,12 +95,15 @@ streams the routes for a client's tenant.
 
 | Var | Required | Default | Notes |
 |-----|----------|---------|-------|
-| `AUTH_PROVIDER` | | `github` | identity provider: `github` or `oidc` |
+| `AUTH_PROVIDER` | | `github` | identity provider: `github`, `oidc` or `go-authn` |
 | `GITHUB_ALLOWED_ORGS` | | — | CSV org-membership allowlist (github authz; recommended) |
 | `GITHUB_API_URL` | | `https://api.github.com` | set for GitHub Enterprise |
 | `OIDC_ISSUER` | when `oidc` | — | issuer URL (discovery) |
 | `OIDC_CLIENT_ID` | when `oidc` | — | expected token audience |
 | `OIDC_ALLOWED_DOMAINS` | | — | CSV email-domain allowlist (oidc authz) |
+| `GOAUTHN_GATEWAY_CLIENT_ID` | when `go-authn` | — | this gateway's own client at the go-authn provider (`wireguard_peers`) |
+| `GOAUTHN_GATEWAY_SECRET_FILE` | when `go-authn` | — | its secret, **from a file only** |
+| `GOAUTHN_PEER_LIST_INTERVAL` | | `30s` | how often the list of registered keys is fetched |
 | `WG_ENDPOINT` | ✅ | — | public `host:port` advertised to clients |
 | `WG_PRIVATE_KEY` / `WG_PRIVATE_KEY_FILE` | ✅ | — | base64 server key |
 | `WG_INTERFACE` | | `wg0` | kernel interface to manage |
