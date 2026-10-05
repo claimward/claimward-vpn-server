@@ -1,7 +1,8 @@
 // Command claimward-server is the Claimward VPN control plane.
 //
 // It authenticates enrolling devices against a pluggable identity provider —
-// GitHub by default, or any OIDC issuer — allocates VPN addresses, and programs
+// GitHub by default, any OIDC issuer, or a go-authn provider, where each
+// device's WireGuard key is registered by its owner — allocates VPN addresses, and programs
 // the local WireGuard gateway (wg0) with one peer per enrolled device. It is
 // designed to run co-located on the Linux gateway host.
 //
@@ -39,9 +40,11 @@ import (
 	"github.com/claimward/claimward-vpn-server/internal/grpcsrv"
 	"github.com/claimward/claimward-vpn-server/internal/ipam"
 	"github.com/claimward/claimward-vpn-server/internal/metrics"
+	"github.com/claimward/claimward-vpn-server/internal/peers"
 	"github.com/claimward/claimward-vpn-server/internal/store"
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
 	"github.com/claimward/claimward-vpn-server/internal/wg"
+	"github.com/go-authn/wireguard"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"google.golang.org/grpc"
 )
@@ -102,6 +105,27 @@ func run(log *slog.Logger) error {
 	ts := tenant.New(cfg.PushRoutes, cfg.DNS)
 	m := metrics.New(st, ts)
 	srv := api.New(cfg, verifier, alloc, st, gw, ts, m, serverPub, log)
+
+	// go-authn: a device's key must be one its owner registered with the
+	// provider, and a key the provider takes back is dropped here.
+	if cfg.AuthProvider == "go-authn" {
+		src, err := wireguard.NewSource(ctx, wireguard.SourceConfig{
+			Issuer: cfg.OIDCIssuer, ClientID: cfg.GatewayClientID, ClientSecret: cfg.GatewaySecret,
+		})
+		if err != nil {
+			return err
+		}
+		reg := peers.New(src)
+		// The first list before listening: a gateway that cannot read it
+		// admits nobody, and should say so now rather than at the first
+		// enrollment.
+		if _, err := reg.Refresh(ctx); err != nil {
+			return err
+		}
+		srv.UsePeers(reg)
+		go reg.Run(ctx, cfg.PeerListInterval, nil, func(*wireguard.List) { srv.Reconcile(reg.Allowed) }, log)
+		log.Info("go-authn WireGuard registry", "issuer", cfg.OIDCIssuer, "gateway_client", cfg.GatewayClientID, "interval", cfg.PeerListInterval)
+	}
 
 	// gRPC RouteService: streams per-tenant route pushes to clients.
 	grpcLn, err := net.Listen("tcp", cfg.GRPCAddr)
