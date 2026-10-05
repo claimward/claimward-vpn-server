@@ -24,6 +24,11 @@ func TestGoAuthnTakesAccessTokensOnly(t *testing.T) {
 	if c.Subject != "sub-alice" || c.Login != "alice@univ.example" || c.Email != "alice@univ.example" {
 		t.Errorf("claims: %+v", c)
 	}
+	// The groups and the institution, which tenants are matched on.
+	c, err = v.Verify(ctx, p.AccessToken("sub-alice", "alice@univ.example", map[string]any{"groups": []string{"urn:mace:univ.example:hpc"}, "idp": "https://idp.univ.example/idp"}))
+	if err != nil || len(c.Groups) != 1 || c.Groups[0] != "urn:mace:univ.example:hpc" || c.IdP != "https://idp.univ.example/idp" {
+		t.Errorf("groups and idp: %+v, %v", c, err)
+	}
 	// An address the provider did not verify is not used.
 	c, err = v.Verify(ctx, p.AccessToken("sub-bob", "bob", map[string]any{"email": "boss@univ.example", "email_verified": false}))
 	if err != nil || c.Email != "" {

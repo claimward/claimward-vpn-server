@@ -16,6 +16,8 @@ package auth
 import (
 	"context"
 	"fmt"
+
+	"github.com/claimward/claimward-vpn-server/internal/tenant"
 )
 
 // Claims is the subset of identity we care about, normalized across providers.
@@ -26,6 +28,14 @@ type Claims struct {
 	Email         string
 	EmailVerified bool
 	Login         string // human handle (GitHub login / OIDC preferred_username), best-effort
+
+	// Groups are what tenants are matched on beside the email domain: the
+	// token's "groups" claim (OIDC, go-authn: eduPerson entitlements), or the
+	// GitHub organisations the person belongs to.
+	Groups []string
+	// IdP is the institution that vouched for the person, when the provider
+	// says (go-authn's "idp": a SAML entity ID).
+	IdP string
 }
 
 // Verifier validates a bearer credential and returns its claims.
@@ -59,4 +69,9 @@ func New(ctx context.Context, opts Options) (Verifier, error) {
 	default:
 		return nil, fmt.Errorf("unknown AUTH_PROVIDER %q (want \"github\", \"oidc\" or \"go-authn\")", opts.Provider)
 	}
+}
+
+// Tenancy is what tenants are matched on, from these claims.
+func (c *Claims) Tenancy() tenant.Member {
+	return tenant.Member{Email: c.Email, EmailVerified: c.EmailVerified, Groups: c.Groups, IdP: c.IdP}
 }

@@ -163,3 +163,94 @@ func TestOnlyARegisteredKeyIsEnrolled(t *testing.T) {
 		t.Error("a reconciliation that allowed the peer dropped it")
 	}
 }
+
+// tenantServer is a server with three tenants, and people in zero, one or
+// two of them.
+func tenantServer(t *testing.T) (*Server, *store.Store, *tenant.Store) {
+	t.Helper()
+	s, st := newServer(t)
+	for _, in := range []tenant.Tenant{
+		{ID: "chem", Name: "Chemistry", Groups: []string{"chem"}, AllowedIPs: []string{"10.1.0.0/16"}},
+		{ID: "hpc", Name: "HPC", Groups: []string{"hpc"}, AllowedIPs: []string{"10.2.0.0/16"}},
+	} {
+		if _, err := s.tenants.Create(in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	people["carol"] = &auth.Claims{Subject: "sub-carol", Groups: []string{"chem", "hpc"}}
+	people["dave"] = &auth.Claims{Subject: "sub-dave", Groups: []string{"hpc"}}
+	t.Cleanup(func() { delete(people, "carol"); delete(people, "dave") })
+	return s, st, s.tenants
+}
+
+func get(t *testing.T, h http.Handler, path, bearer string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.Header.Set("Authorization", "Bearer "+bearer)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
+}
+
+// A person in several tenants is offered them, must choose, and gets the
+// routes of the one chosen; a person in one is connected to it without
+// asking.
+func TestAPersonInSeveralTenantsChooses(t *testing.T) {
+	s, st, _ := tenantServer(t)
+	h := s.Handler()
+	w := get(t, h, protocol.PathTenants, "carol")
+	var offered []protocol.TenantInfo
+	json.Unmarshal(w.Body.Bytes(), &offered)
+	if w.Code != http.StatusOK || len(offered) != 2 || offered[0].ID != "chem" || offered[1].Name != "HPC" {
+		t.Fatalf("carol is offered %d %v", w.Code, offered)
+	}
+	if w := call(t, h, protocol.PathEnroll, "carol", protocol.EnrollRequest{PublicKey: aliceKey}); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "tenant_required") {
+		t.Errorf("carol choosing nothing: %d %s", w.Code, w.Body)
+	}
+	if w := call(t, h, protocol.PathEnroll, "carol", protocol.EnrollRequest{PublicKey: aliceKey, Tenant: "default"}); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "not_a_member") {
+		t.Errorf("carol choosing a tenant not theirs: %d %s", w.Code, w.Body)
+	}
+	w = call(t, h, protocol.PathEnroll, "carol", protocol.EnrollRequest{PublicKey: aliceKey, Tenant: "hpc"})
+	var resp protocol.EnrollResponse
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if w.Code != http.StatusOK || len(resp.AllowedIPs) != 1 || resp.AllowedIPs[0] != "10.2.0.0/16" {
+		t.Fatalf("carol choosing hpc: %d %s", w.Code, w.Body)
+	}
+	if p := st.Get(aliceKey); p == nil || p.Tenant != "hpc" {
+		t.Errorf("the peer records %+v", p)
+	}
+	// A new session may choose the other one.
+	w = call(t, h, protocol.PathEnroll, "carol", protocol.EnrollRequest{PublicKey: aliceKey, Tenant: "chem"})
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if w.Code != http.StatusOK || resp.AllowedIPs[0] != "10.1.0.0/16" || st.Get(aliceKey).Tenant != "chem" {
+		t.Errorf("carol switching to chem: %d %s", w.Code, w.Body)
+	}
+
+	// Dave is in one: no choice to make.
+	const daveKey = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
+	if w := call(t, h, protocol.PathEnroll, "dave", protocol.EnrollRequest{PublicKey: daveKey}); w.Code != http.StatusOK || st.Get(daveKey).Tenant != "hpc" {
+		t.Errorf("dave: %d %s", w.Code, w.Body)
+	}
+	// Alice matches none: the default tenant, as before tenants were many.
+	if w := get(t, h, protocol.PathTenants, "alice"); !strings.Contains(w.Body.String(), `"default"`) {
+		t.Errorf("alice is offered %s", w.Body)
+	}
+}
+
+// Taken off a tenant, a person's heartbeat in it is refused.
+func TestLeavingATenantEndsTheLeaseThere(t *testing.T) {
+	s, _, ts := tenantServer(t)
+	h := s.Handler()
+	if w := call(t, h, protocol.PathEnroll, "carol", protocol.EnrollRequest{PublicKey: aliceKey, Tenant: "hpc"}); w.Code != http.StatusOK {
+		t.Fatal(w.Body)
+	}
+	if w := call(t, h, protocol.PathHeartbeat, "carol", protocol.HeartbeatRequest{PublicKey: aliceKey}); w.Code != http.StatusOK {
+		t.Fatalf("heartbeat while a member: %d", w.Code)
+	}
+	if _, err := ts.Update("hpc", tenant.Tenant{Name: "HPC", Groups: []string{"someone-else"}, AllowedIPs: []string{"10.2.0.0/16"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w := call(t, h, protocol.PathHeartbeat, "carol", protocol.HeartbeatRequest{PublicKey: aliceKey}); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "not_a_member") {
+		t.Errorf("heartbeat after leaving the tenant: %d %s", w.Code, w.Body)
+	}
+}

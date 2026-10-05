@@ -37,6 +37,7 @@ func (v *OIDCVerifier) Verify(ctx context.Context, rawIDToken string) (*Claims, 
 		Email             string `json:"email"`
 		EmailVerified     bool   `json:"email_verified"`
 		PreferredUsername string `json:"preferred_username"`
+		Groups            any    `json:"groups"`
 	}
 	if err := tok.Claims(&raw); err != nil {
 		return nil, fmt.Errorf("decode claims: %w", err)
@@ -46,6 +47,7 @@ func (v *OIDCVerifier) Verify(ctx context.Context, rawIDToken string) (*Claims, 
 		Email:         raw.Email,
 		EmailVerified: raw.EmailVerified,
 		Login:         raw.PreferredUsername,
+		Groups:        stringList(raw.Groups),
 	}
 
 	if len(v.allowedDomains) > 0 && !domainAllowed(claims.Email, v.allowedDomains) {
@@ -66,4 +68,24 @@ func domainAllowed(email string, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+// stringList reads a claim that is a list of strings or, as some providers
+// send a single group, one string.
+func stringList(v any) []string {
+	switch v := v.(type) {
+	case string:
+		if v != "" {
+			return []string{v}
+		}
+	case []any:
+		var out []string
+		for _, x := range v {
+			if s, ok := x.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }

@@ -79,8 +79,9 @@ The list comes from [go-authn/wireguard](https://github.com/go-authn/wireguard):
   else, which is why events are not verified.
 
 Only **access tokens** (`typ: at+jwt`, RFC 9068 §4) addressed to this server
-are accepted, never an ID token. An email address is used for tenant mapping
-only when the provider verified it.
+are accepted, never an ID token. Tenants are matched on the token's `groups`
+and `idp` (see [Tenants](#tenants)), and on an email domain only when the
+provider verified the address.
 
 ## Other surfaces
 
@@ -94,8 +95,28 @@ Beyond the enrollment API, the server exposes:
   embedded Svelte single-page app. Disabled unless `ADMIN_TOKEN` is set.
 - **Prometheus metrics** — exposition at `/metrics`.
 
-Routes are tenant-scoped: identities are mapped to tenants, and the RouteService
-streams the routes for a client's tenant.
+## Tenants
+
+Routes are tenant-scoped, and **a person may belong to several tenants**. They
+choose one per session, and the device connects to that one. A person belongs
+to every tenant that names any of:
+
+| | matched against |
+|---|---|
+| `domains` | the domain of a **verified** email (an unverified one is a string the person typed) |
+| `groups` | the token's `groups` claim (OIDC; go-authn: eduPerson entitlements), or the person's GitHub organisations |
+| `idps` | the institution that vouched for them: go-authn's `idp`, a SAML entity ID |
+
+A person who matches none belongs to the `default` tenant, and only then.
+
+| | |
+|---|---|
+| `GET /api/v1/tenants` | the tenants the caller may connect to, `[{id, name}]`, for a client to offer the choice |
+| `POST /api/v1/enroll` with `tenant` | must be one of them (`403 not_a_member`); without one, the caller's only tenant. A person in several gets `409 tenant_required` with the list, rather than being routed into a network they did not choose |
+| `POST /api/v1/heartbeat` | refused (`403 not_a_member`) once the person is no longer in the session's tenant |
+| RouteService `Watch` | streams the routes of the tenant **the device enrolled into**, found by its key, which must be the caller's |
+
+The admin API and WebUI edit the three membership lists beside the routes.
 
 ## Configuration (environment)
 

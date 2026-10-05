@@ -40,7 +40,8 @@ func (g *GoAuthnVerifier) Verify(ctx context.Context, bearer string) (*Claims, e
 	if tok.Subject() == "" {
 		return nil, fmt.Errorf("invalid token: no subject")
 	}
-	c := &Claims{Subject: tok.Subject(), Login: tok.Username(), EmailVerified: tok.EmailVerified()}
+	c := &Claims{Subject: tok.Subject(), Login: tok.Username(), EmailVerified: tok.EmailVerified(), Groups: tok.Groups()}
+	_ = tok.Claim("idp", &c.IdP)
 	// An unverified address is a string the person typed: tenant mapping is
 	// by email, so only one the provider verified is used.
 	if c.EmailVerified {

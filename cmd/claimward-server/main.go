@@ -143,7 +143,7 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	gs := grpc.NewServer(grpc.StreamInterceptor(grpcsrv.AuthStreamInterceptor(verifier)))
-	routespb.RegisterRouteServiceServer(gs, grpcsrv.New(ts))
+	routespb.RegisterRouteServiceServer(gs, grpcsrv.New(ts, st))
 	go gs.Serve(grpcLn) //nolint:errcheck
 	go func() {
 		<-ctx.Done()
