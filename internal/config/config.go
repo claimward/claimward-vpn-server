@@ -20,10 +20,10 @@ type Config struct {
 
 	AdminToken string // bearer for the admin WebUI/API; empty disables admin
 
-	AuthProvider string // "github" (default) or "oidc"
+	AuthProvider string // "github" (default), "oidc" or "go-authn"
 
-	OIDCIssuer     string   // required when AuthProvider == "oidc"
-	OIDCClientID   string   // required when AuthProvider == "oidc" (token audience)
+	OIDCIssuer     string   // required when AuthProvider is "oidc" or "go-authn"
+	OIDCClientID   string   // required when AuthProvider is "oidc" or "go-authn" (token audience)
 	AllowedDomains []string // optional email-domain allowlist for authz (oidc)
 
 	// go-authn: the gateway's own client at the provider, which reads the
