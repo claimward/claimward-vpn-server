@@ -44,8 +44,15 @@ client <-- assigned IP, server pubkey, endpoint, the tenant's routes + DNS, gRPC
 A background reaper (every minute) removes peers whose lease expired (no heartbeat).
 
 Leases and tenants are held **in memory**: a restart forgets every enrollment
-(devices re-enroll) and every tenant created through the admin API, leaving
-the `default` tenant seeded from `PUSH_ROUTES` and `DNS`.
+and every tenant created through the admin API, leaving the `default` tenant
+seeded from `PUSH_ROUTES` and `DNS`. At startup the server therefore **removes
+the peers a previous run left** on the interface: those whose only allowed IP
+is a `/32` inside `VPN_CIDR`, the shape it gives every peer. Any other peer
+(configured by hand, a site-to-site link) is left alone. Kept, they would be
+nobody's: never reaped, never checked against the provider's list, so a person
+disabled before the restart would keep a working tunnel. Devices find
+themselves unknown at their next lease renewal and enroll again (from
+claimward-vpn-client v0.3.0).
 
 A key belongs to whoever enrolled it: enrolling a key another identity holds
 is refused (`409 key_taken`). A WireGuard public key is public, and before
