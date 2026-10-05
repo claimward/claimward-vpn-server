@@ -36,6 +36,12 @@ type Provider struct {
 
 	mu   sync.Mutex
 	list wireguard.List
+
+	// The SSF transmitter, poll delivery.
+	streams  int      // created
+	events   []string // jtis waiting
+	Acked    []string // jtis the receiver acknowledged
+	PollSeen int
 }
 
 // New starts one, closed when the test ends.
@@ -62,12 +68,59 @@ func New(t *testing.T) *Provider {
 	})
 	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
 		id, secret, _ := r.BasicAuth()
-		if id != GatewayID || secret != GatewaySecret || r.FormValue("scope") != wireguard.ScopePeers {
+		scope := r.FormValue("scope")
+		if id != GatewayID || secret != GatewaySecret || (scope != wireguard.ScopePeers && scope != "ssf") {
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(map[string]any{"error": "invalid_client"})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"access_token": "gateway-token", "token_type": "Bearer"})
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "gateway-token", "token_type": "Bearer", "expires_in": 300})
+	})
+	mux.HandleFunc("GET /.well-known/ssf-configuration", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issuer": iss, "configuration_endpoint": iss + "/ssf/streams", "delivery_methods_supported": []string{"urn:ietf:rfc:8936"}})
+	})
+	stream := func() map[string]any {
+		return map[string]any{"stream_id": "s1", "delivery": map[string]any{"method": "urn:ietf:rfc:8936", "endpoint_url": iss + "/ssf/poll"}}
+	}
+	mux.HandleFunc("/ssf/streams", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer gateway-token" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		switch r.Method {
+		case http.MethodGet:
+			out := []any{}
+			if p.streams > 0 {
+				out = append(out, stream())
+			}
+			json.NewEncoder(w).Encode(out)
+		case http.MethodPost:
+			p.streams++
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(stream())
+		}
+	})
+	mux.HandleFunc("POST /ssf/poll", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer gateway-token" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		var req struct {
+			Ack []string `json:"ack"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.PollSeen++
+		p.Acked = append(p.Acked, req.Ack...)
+		sets := map[string]string{}
+		for _, j := range p.events {
+			sets[j] = "a.set.jwt"
+		}
+		p.events = nil
+		json.NewEncoder(w).Encode(map[string]any{"sets": sets})
 	})
 	mux.HandleFunc("GET "+wireguard.ListPath, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer gateway-token" {
@@ -82,6 +135,20 @@ func New(t *testing.T) *Provider {
 		w.Write([]byte(p.Sign(wireguard.ListType, l.Claims(iss, GatewayID))))
 	})
 	return p
+}
+
+// Event queues a Shared Signals event for the receiver's next poll.
+func (p *Provider) Event(jti string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, jti)
+}
+
+// Streams is how many streams the receiver created.
+func (p *Provider) Streams() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.streams
 }
 
 // Issuer is the provider's issuer URL.

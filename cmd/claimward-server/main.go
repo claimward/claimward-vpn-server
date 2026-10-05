@@ -41,6 +41,7 @@ import (
 	"github.com/claimward/claimward-vpn-server/internal/ipam"
 	"github.com/claimward/claimward-vpn-server/internal/metrics"
 	"github.com/claimward/claimward-vpn-server/internal/peers"
+	"github.com/claimward/claimward-vpn-server/internal/ssfpoll"
 	"github.com/claimward/claimward-vpn-server/internal/store"
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
 	"github.com/claimward/claimward-vpn-server/internal/wg"
@@ -123,7 +124,16 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		srv.UsePeers(reg)
-		go reg.Run(ctx, cfg.PeerListInterval, nil, func(*wireguard.List) { srv.Reconcile(reg.Allowed) }, log)
+		// An SSF event -- somebody disabled -- fetches the list now; the
+		// list alone decides what it means.
+		kick := make(chan struct{}, 1)
+		if cfg.SSF {
+			go ssfpoll.New(ssfpoll.Config{
+				Issuer: cfg.OIDCIssuer, ClientID: cfg.GatewayClientID, ClientSecret: cfg.GatewaySecret,
+				Interval: cfg.SSFInterval,
+			}, kick, log).Run(ctx)
+		}
+		go reg.Run(ctx, cfg.PeerListInterval, kick, func(*wireguard.List) { srv.Reconcile(reg.Allowed) }, log)
 		log.Info("go-authn WireGuard registry", "issuer", cfg.OIDCIssuer, "gateway_client", cfg.GatewayClientID, "interval", cfg.PeerListInterval)
 	}
 
