@@ -13,8 +13,11 @@
 //
 //	WG_ENDPOINT      public host:port of the WireGuard gateway
 //	WG_PRIVATE_KEY   base64 server private key (or WG_PRIVATE_KEY_FILE)
-//	OIDC_ISSUER      OIDC issuer URL       (required when AUTH_PROVIDER=oidc)
-//	OIDC_CLIENT_ID   expected token audience (required when AUTH_PROVIDER=oidc)
+//	OIDC_ISSUER      OIDC issuer URL         (AUTH_PROVIDER=oidc or go-authn)
+//	OIDC_CLIENT_ID   expected token audience (AUTH_PROVIDER=oidc or go-authn)
+//	GOAUTHN_GATEWAY_CLIENT_ID, GOAUTHN_GATEWAY_SECRET_FILE
+//	                 the gateway's own client, which reads the list of
+//	                 registered keys          (AUTH_PROVIDER=go-authn)
 //
 // See internal/config for the full list. Set WG_DRYRUN=true to run without a
 // real WireGuard device (local development).
