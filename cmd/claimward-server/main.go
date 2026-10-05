@@ -106,6 +106,17 @@ func run(log *slog.Logger) error {
 		}
 	}
 	defer gw.Close()
+	// Leases are held in memory: the peers a previous run left on the
+	// device are nobody's now, and would outlive any revocation.
+	_, pool, err := net.ParseCIDR(cfg.VPNCIDR)
+	if err != nil {
+		return err
+	}
+	if n, err := wg.Sweep(gw, pool); err != nil {
+		return fmt.Errorf("remove the peers a previous run left on %s: %w", cfg.WGInterface, err)
+	} else if n > 0 {
+		log.Warn("removed peers a previous run left; their devices enroll again", "interface", cfg.WGInterface, "peers", n)
+	}
 
 	st := store.New()
 	ts := tenant.New(cfg.PushRoutes, cfg.DNS)
