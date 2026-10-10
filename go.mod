@@ -1,6 +1,6 @@
 module github.com/claimward/claimward-vpn-server
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/claimward/claimward-vpn-client v0.3.1
@@ -26,7 +26,7 @@ require (
 	github.com/prometheus/common v0.72.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
