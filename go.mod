@@ -5,8 +5,8 @@ go 1.27.2
 require (
 	github.com/claimward/claimward-vpn-client v0.3.1
 	github.com/coreos/go-oidc/v3 v3.21.0
-	github.com/go-authn/oidc v0.4.0
-	github.com/go-authn/wireguard v0.1.0
+	github.com/go-authn/oidc v0.4.1
+	github.com/go-authn/wireguard v0.1.1
 	github.com/prometheus/client_golang v1.25.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	google.golang.org/grpc v1.84.0
