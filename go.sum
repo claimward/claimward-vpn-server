@@ -6,10 +6,10 @@ github.com/claimward/claimward-vpn-client v0.3.1 h1:umnlqJS+i9tip2EfZQSMbgrV/qOS
 github.com/claimward/claimward-vpn-client v0.3.1/go.mod h1:1M58h/wlJ0N68BfQQ7PZYJUw3h4HIrXckUUUc5Orr1o=
 github.com/coreos/go-oidc/v3 v3.21.0 h1:wZo4Q9Pum8dYEj0eMUPrqR+kvuGkeUplbLpNCkBqoWM=
 github.com/coreos/go-oidc/v3 v3.21.0/go.mod h1:DYCf24+ncYi+XkIH97GY1+dqoRlbaSI26KVTCI9SrY4=
-github.com/go-authn/oidc v0.4.1 h1:G1tjLAswrPUvOraciHrb+vOYSSHdMuCKBryrHrLTWHo=
-github.com/go-authn/oidc v0.4.1/go.mod h1:d46Qe8EHpNA5hadeFlUUYMHCDkYzwwNAP6AYu9KdxYk=
-github.com/go-authn/wireguard v0.1.1 h1:DW/CCq3WsgU1dijkow4jlh23jOxeOK36XcniE/1ueyQ=
-github.com/go-authn/wireguard v0.1.1/go.mod h1:HPv2SJ4/nq82lKzlB1mJ3bfIDfUPYKYugkrXbWbia3k=
+github.com/go-authn/oidc v0.4.2 h1:sTcoLgpH4jaNhkQ5MwkmTRLI1Iwi1cGPyGunkMnZqiQ=
+github.com/go-authn/oidc v0.4.2/go.mod h1:d46Qe8EHpNA5hadeFlUUYMHCDkYzwwNAP6AYu9KdxYk=
+github.com/go-authn/wireguard v0.1.2 h1:Lnm8iCSpcQc8ilV0jux0USj5E7ioiAaeDNOIPw2Hs/s=
+github.com/go-authn/wireguard v0.1.2/go.mod h1:/fGMUz4eISQ2l37E/FGzh6X9syBVjmEZ9VyDP/Mrb40=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
 github.com/go-jose/go-jose/v4 v4.1.4/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
 github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
