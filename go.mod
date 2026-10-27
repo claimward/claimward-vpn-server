@@ -1,15 +1,15 @@
 module github.com/claimward/claimward-vpn-server
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/claimward/claimward-vpn-client v0.3.1
 	github.com/coreos/go-oidc/v3 v3.21.0
-	github.com/go-authn/oidc v0.4.2
+	github.com/go-authn/oidc v0.4.3
 	github.com/go-authn/wireguard v0.1.2
 	github.com/prometheus/client_golang v1.25.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
-	google.golang.org/grpc v1.84.0
+	google.golang.org/grpc v1.85.0
 )
 
 require (
@@ -32,6 +32,6 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.zx2c4.com/wireguard v0.0.0-20260522210424-ecfc5a8d5446 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
