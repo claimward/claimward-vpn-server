@@ -109,9 +109,9 @@ Beyond the enrollment API, the server exposes:
   it ends when the device is deregistered or reaped, when the person leaves the
   tenant, when the tenant is deleted, and at the token's expiry (the client
   reconnects with a fresh token).
-- **Admin API + WebUI** — a token-guarded (`ADMIN_TOKEN`) surface under `/admin/`:
+- **Admin API + WebUI** — a token-guarded (`admin-token` credential) surface under `/admin/`:
   a `GET /admin/api/overview`, tenant CRUD at `/admin/api/tenants[...]`, and an
-  embedded Svelte single-page app. Disabled unless `ADMIN_TOKEN` is set.
+  embedded Svelte single-page app. Disabled unless the `admin-token` credential exists.
 - **Prometheus metrics** — exposition at `/metrics` on its own listener,
   `METRICS_ADDR` (default `127.0.0.1:9090`), never on the enrollment port.
   Every listener has read, write and idle timeouts and a connection cap;
@@ -149,8 +149,16 @@ the token's subject, `github:<id>`, never on the login: a renamed account whose
 old login now belongs to another person is refused. An unresolvable login is an
 error (the server does not start; the admin API answers `400`). The admin API
 and WebUI show the logins (and `pinned`, read-only); to follow a rename, edit
-the tenant again. Resolution is unauthenticated (60 requests an hour per
-address on github.com).
+the tenant again. Resolution is authenticated with the **`github-token`
+credential** (a bearer, 5000 requests an hour; no scope is needed for public
+data), which is **required as soon as any tenant has `members`**: without it the
+server does not start, and the admin API answers `400`. The token is only sent
+over https (or to a loopback address).
+
+The organisation check does **not** use this token: it runs with the *person's*
+own token, so a private membership is visible only if their token carries
+`read:org`. `github-token` therefore stays optional when only organisations are
+used.
 
 A named member is also **admitted** by the GitHub entry gate without belonging
 to an allowed organisation.
@@ -225,6 +233,39 @@ allowed and denied flow. It needs root: it is skipped, with the reason printed,
 elsewhere, and the privileged CI lane sets `CW_REQUIRE_NETNS=1` so that it can
 not be skipped there.
 
+## Credentials (v0.6.0)
+
+**Every secret is a file in a credentials directory, never an environment
+variable** (an environment is copied into every child process and every crash
+dump). The directory is `$CREDENTIALS_DIRECTORY`: systemd sets it for
+`LoadCredential=`/`LoadCredentialEncrypted=`; set it yourself for Docker/Podman
+(`/run/secrets`) and Kubernetes (the Secret volume's mount path). The file
+names are fixed, and one trailing newline is trimmed:
+
+| File | Required | Content |
+|------|----------|---------|
+| `wg-private-key` | always | base64 WireGuard server key |
+| `admin-token` | no | bearer of the admin API/WebUI; **without the file the admin API is disabled** |
+| `goauthn-gateway-secret` | `AUTH_PROVIDER=go-authn` | the gateway client's secret |
+| `github-token` | when any tenant has `members` | bearer for `GET /users/{login}` (see *Named members*) |
+
+A missing required file stops the start and names the file. Before reading,
+each file is checked through its open descriptor (`O_NOFOLLOW`, then `fstat`):
+it must be a regular file (no symlink), owned by the server's uid, with no
+group or other permission (`0400`), non-empty and at most 64 KiB; otherwise the
+server refuses, with the fix: Swarm `mode: 0400`, Kubernetes `defaultMode: 0400`
+(+ `fsGroup`/`runAsUser`), Podman `--secret ...,mode=0400`, else `chmod 0400`.
+
+⛔ **Migration from v0.5.0** (breaking). `ADMIN_TOKEN`, `WG_PRIVATE_KEY`,
+`WG_PRIVATE_KEY_FILE` and `GOAUTHN_GATEWAY_SECRET_FILE` are **no longer read**,
+and the server refuses to start while any is set (no fallback). Put each value
+in the file named above, unset the variable, and set `CREDENTIALS_DIRECTORY`.
+Tenants with `members` now also need `github-token`. Ready-made units are in
+[`deploy/`](deploy/README.md) (systemd, Compose, Podman Quadlet, Kubernetes).
+Hosts without systemd will be able to get the same directory from
+`go-authn/sdcreds` (`sdcreds s6-run`) once its v0.1.0 is tagged; this server
+does not depend on it.
+
 ## Configuration (environment)
 
 | Var | Required | Default | Notes |
@@ -236,12 +277,11 @@ not be skipped there.
 | `OIDC_CLIENT_ID` | when `oidc` or `go-authn` | — | expected token audience |
 | `OIDC_ALLOWED_DOMAINS` | | — | CSV email-domain allowlist (oidc authz); only an address the IdP marks `email_verified` counts |
 | `GOAUTHN_GATEWAY_CLIENT_ID` | when `go-authn` | — | this gateway's own client at the go-authn provider (`wireguard_peers`) |
-| `GOAUTHN_GATEWAY_SECRET_FILE` | when `go-authn` | — | its secret, **from a file only** |
 | `GOAUTHN_PEER_LIST_INTERVAL` | | `30s` | how often the list of registered keys is fetched |
 | `GOAUTHN_SSF` | | `false` | also listen to the provider's Shared Signals (poll), so a disabling is acted on at once; the gateway's client must be an SSF receiver there |
 | `GOAUTHN_SSF_INTERVAL` | | `5s` | how often the SSF stream is polled |
 | `WG_ENDPOINT` | ✅ | — | public `host:port` advertised to clients |
-| `WG_PRIVATE_KEY` / `WG_PRIVATE_KEY_FILE` | ✅ | — | base64 server key |
+| `CREDENTIALS_DIRECTORY` | ✅ | — | directory of the secret files (see *Credentials*) |
 | `WG_INTERFACE` | | `wg0` | kernel interface to manage |
 | `WG_DRYRUN` | | `false` | log peer ops instead of applying — local dev |
 | `VPN_CIDR` | | `10.80.0.0/24` | address pool; `.1` is the gateway |
@@ -255,7 +295,6 @@ not be skipped there.
 | `GRPC_ADDR` | | `:8444` | RouteService gRPC listen address |
 | `METRICS_ADDR` | | `127.0.0.1:9090` | where `/metrics` is served, on its own listener (it names every tenant, so it is loopback by default; expose it only on a trusted network) |
 | `GRPC_ENDPOINT` | | — | `host:port` advertised to clients for route streaming |
-| `ADMIN_TOKEN` | | — | bearer for the admin API/WebUI; empty disables admin |
 | `DEBUG` | | — | any value enables debug logging |
 | `TLS_CERT` / `TLS_KEY` | | — | enable HTTPS **and TLS on the gRPC RouteService**. A route watch carries the bearer token, and claimward clients refuse a plaintext one except on loopback; without these, devices connect but get no live route updates |
 
@@ -272,7 +311,9 @@ export AUTH_PROVIDER=oidc                                   # or default `github
 export OIDC_ISSUER=https://accounts.google.com
 export OIDC_CLIENT_ID=xxxx.apps.googleusercontent.com
 export WG_ENDPOINT=vpn.example.com:51820
-export WG_PRIVATE_KEY=$(wg genkey)
+export CREDENTIALS_DIRECTORY=$HOME/.local/state/claimward-dev-creds
+(umask 077; mkdir -p "$CREDENTIALS_DIRECTORY"; wg genkey > "$CREDENTIALS_DIRECTORY/wg-private-key")
+chmod 0400 "$CREDENTIALS_DIRECTORY/wg-private-key"
 export WG_DRYRUN=true LISTEN_ADDR=:8080
 
 go run ./cmd/claimward-server

@@ -68,7 +68,7 @@ func resolverServer(t *testing.T, h http.HandlerFunc) func(string) (int64, error
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	r := NewGitHubResolver(srv.URL)
+	r := NewGitHubResolver(srv.URL, "tok")
 	return func(login string) (int64, error) { return r(context.Background(), login) }
 }
 
@@ -118,7 +118,7 @@ func TestResolverBounds(t *testing.T) {
 	t.Cleanup(func() { close(release) })
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if _, err := NewGitHubResolver(slow.URL)(ctx, "a"); err == nil {
+	if _, err := NewGitHubResolver(slow.URL, "tok")(ctx, "a"); err == nil {
 		t.Error("a silent server did not stop the resolution")
 	}
 }

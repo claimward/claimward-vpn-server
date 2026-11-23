@@ -1,14 +1,32 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// credsDir writes each name: content as a 0400 file in a fresh directory and
+// points CREDENTIALS_DIRECTORY at it. It returns the directory.
+func credsDir(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("CREDENTIALS_DIRECTORY", dir)
+	return dir
+}
 
 // baseEnv is the least environment Load accepts with the OIDC provider, so
 // the tests below vary one setting at a time.
 func baseEnv(t *testing.T) {
 	t.Helper()
+	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy\n"})
 	t.Setenv("WG_ENDPOINT", "vpn.example.org:51820")
-	t.Setenv("WG_PRIVATE_KEY", "c2VydmVy")
-	t.Setenv("WG_PRIVATE_KEY_FILE", "")
 	t.Setenv("AUTH_PROVIDER", "oidc")
 	t.Setenv("OIDC_ISSUER", "https://idp.example.org")
 	t.Setenv("OIDC_CLIENT_ID", "claimward")

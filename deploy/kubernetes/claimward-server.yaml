@@ -1,0 +1,56 @@
+# Kubernetes: a Deployment and the Secret volume that carries the credentials.
+#
+# Create the Secret from files, never from a manifest in git:
+#   kubectl create secret generic claimward-credentials \
+#     --from-file=wg-private-key=./wg-private-key
+#   (add --from-file=github-token=..., admin-token=..., goauthn-gateway-secret=...)
+#
+# A Secret volume is tmpfs (no emptyDir is involved) and its files are owned by
+# ROOT, with the group set by fsGroup. The server refuses a credential its own
+# uid does not own, so the pod runs as uid 0 with every capability dropped but
+# NET_ADMIN, which the WireGuard and nftables netlink calls need anyway.
+#
+# No image is published yet: build one from this repository and push it.
+# The WireGuard interface (wg0) must exist on the node: hostNetwork.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claimward-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # one control plane per gateway: leases are in memory
+  selector:
+    matchLabels: {app: claimward-server}
+  template:
+    metadata:
+      labels: {app: claimward-server}
+    spec:
+      hostNetwork: true
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 0 # owner of the Secret files, see above
+        runAsNonRoot: false
+        fsGroup: 0
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: claimward-server
+          image: registry.example.org/claimward-vpn-server:v0.6.0
+          env:
+            - {name: CREDENTIALS_DIRECTORY, value: /run/credentials}
+            - {name: WG_ENDPOINT, value: "vpn.example.org:51820"}
+            - {name: AUTH_PROVIDER, value: github}
+            - {name: GITHUB_ALLOWED_ORGS, value: example-org}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+              add: [NET_ADMIN]
+          volumeMounts:
+            - {name: credentials, mountPath: /run/credentials, readOnly: true}
+      volumes:
+        - name: credentials
+          secret:
+            secretName: claimward-credentials
+            defaultMode: 0400

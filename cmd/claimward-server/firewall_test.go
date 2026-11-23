@@ -64,7 +64,11 @@ func runEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("WG_DRYRUN", "true")
 	t.Setenv("WG_ENDPOINT", "vpn.example.org:51820")
-	t.Setenv("WG_PRIVATE_KEY", "YPnXq6Z6cBZ7bmF3ZyYh8mEYV0Q1qS6mQH2k6jH6s3A=")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "wg-private-key"), []byte("YPnXq6Z6cBZ7bmF3ZyYh8mEYV0Q1qS6mQH2k6jH6s3A=\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CREDENTIALS_DIRECTORY", dir)
 	t.Setenv("LISTEN_ADDR", "127.0.0.1:0")
 	t.Setenv("GRPC_ADDR", "127.0.0.1:0")
 	t.Setenv("METRICS_ADDR", "127.0.0.1:0")
@@ -97,6 +101,23 @@ func TestRunRefusesAnOpenGitHubGate(t *testing.T) {
 	defer stop.Stop()
 	if err := run(quiet); err == nil {
 		t.Fatal("run started with no org allowlist and no named member")
+	}
+}
+
+// A tenant naming members needs the github-token credential: without it run
+// stops, naming the file, before anything is served.
+func TestRunRefusesMembersWithoutAGitHubToken(t *testing.T) {
+	runEnv(t)
+	t.Setenv("TENANTS_FILE", writeFile(t, `[{"id":"lab","members":["alice"],"policy":[{"cidr":"10.20.0.5/32","proto":"tcp","ports":[445]}]}]`))
+	stop := time.AfterFunc(3*time.Second, func() {
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = p.Signal(os.Interrupt)
+		}
+	})
+	defer stop.Stop()
+	err := run(quiet)
+	if err == nil || !strings.Contains(err.Error(), "github-token") {
+		t.Fatalf("err = %v, want one naming github-token", err)
 	}
 }
 

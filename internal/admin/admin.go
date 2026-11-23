@@ -25,7 +25,7 @@ type Server struct {
 	log     *slog.Logger
 }
 
-// New builds the admin server. token is the ADMIN_TOKEN; if empty, the admin
+// New builds the admin server. token is the admin-token credential; if empty, the admin
 // API and UI are disabled.
 func New(tenants *tenant.Store, peers *store.Store, token string, ui fs.FS, log *slog.Logger) *Server {
 	return &Server{tenants: tenants, peers: peers, token: token, ui: ui, log: log}
@@ -37,9 +37,9 @@ func (s *Server) Enabled() bool { return s.token != "" }
 // Register mounts the admin routes on the given mux.
 func (s *Server) Register(mux *http.ServeMux) {
 	if !s.Enabled() {
-		s.log.Warn("ADMIN_TOKEN not set — admin UI/API disabled")
+		s.log.Warn("no admin-token credential — admin UI/API disabled")
 		mux.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "admin disabled (set ADMIN_TOKEN)", http.StatusServiceUnavailable)
+			http.Error(w, "admin disabled (create the admin-token credential)", http.StatusServiceUnavailable)
 		})
 		return
 	}

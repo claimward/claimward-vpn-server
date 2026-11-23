@@ -4,9 +4,8 @@ import "testing"
 
 func githubEnv(t *testing.T, orgs string) {
 	t.Helper()
+	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy"})
 	t.Setenv("WG_ENDPOINT", "vpn.example.org:51820")
-	t.Setenv("WG_PRIVATE_KEY", "c2VydmVy")
-	t.Setenv("WG_PRIVATE_KEY_FILE", "")
 	t.Setenv("AUTH_PROVIDER", "")
 	t.Setenv("GITHUB_ALLOWED_ORGS", orgs)
 }

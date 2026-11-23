@@ -1,0 +1,63 @@
+[Unit]
+Description=Claimward VPN control plane
+Documentation=https://github.com/claimward/claimward-vpn-server/blob/main/deploy/README.md
+# The WireGuard interface (wg0) must already exist: create it with
+# wg-quick@wg0 or systemd-networkd. The server only manages its peers.
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/claimward-server
+Restart=on-failure
+RestartSec=5
+
+# --- Secrets: a credentials directory, never the environment -------------
+# systemd decrypts each credential into $CREDENTIALS_DIRECTORY (a private
+# tmpfs, mode 0400, owned by the service's user) and sets the variable.
+# Create them with `systemd-creds encrypt` (see deploy/README.md).
+LoadCredentialEncrypted=wg-private-key:/etc/credstore.encrypted/claimward.wg-private-key
+# Add the ones your configuration needs; a missing file stops the unit.
+#   AUTH_PROVIDER=go-authn      goauthn-gateway-secret
+#   a tenant with `members`     github-token
+#   the admin API/WebUI         admin-token (without it the admin API is off)
+#LoadCredentialEncrypted=goauthn-gateway-secret:/etc/credstore.encrypted/claimward.goauthn-gateway-secret
+#LoadCredentialEncrypted=github-token:/etc/credstore.encrypted/claimward.github-token
+#LoadCredentialEncrypted=admin-token:/etc/credstore.encrypted/claimward.admin-token
+
+# --- Configuration (not secret) -----------------------------------------
+Environment=WG_ENDPOINT=vpn.example.org:51820
+Environment=AUTH_PROVIDER=github
+Environment=GITHUB_ALLOWED_ORGS=example-org
+Environment=WG_INTERFACE=wg0
+# TENANTS_FILE is read by the service's user: keep it under /etc/claimward
+# (world-readable is fine, it holds no secret) and set it here:
+#Environment=TENANTS_FILE=/etc/claimward/tenants.json
+
+# --- Hardening ------------------------------------------------------------
+DynamicUser=yes
+# CAP_NET_ADMIN: wgctrl and nftables, over netlink. Nothing else.
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
