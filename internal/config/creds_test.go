@@ -101,6 +101,19 @@ func TestAdminTokenOptionalButChecked(t *testing.T) {
 	loadErr(t, "admin-token", "mode")
 }
 
+func TestGitHubTokenOptionalButChecked(t *testing.T) {
+	baseEnv(t)
+	dir := os.Getenv("CREDENTIALS_DIRECTORY")
+	p := filepath.Join(dir, "github-token")
+	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	loadErr(t, "github-token", "mode")
+}
+
 func TestUnsafeRequiredCredentialRefused(t *testing.T) {
 	baseEnv(t)
 	dir := os.Getenv("CREDENTIALS_DIRECTORY")
