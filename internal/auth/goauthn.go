@@ -42,6 +42,9 @@ func (g *GoAuthnVerifier) Verify(ctx context.Context, bearer string) (*Claims, e
 	}
 	c := &Claims{Subject: tok.Subject(), Login: tok.Username(), EmailVerified: tok.EmailVerified(), Groups: tok.Groups()}
 	_ = tok.Claim("idp", &c.IdP)
+	if exp, ok := tok.Expiry(); ok {
+		c.Expires = exp
+	}
 	// An unverified address is a string the person typed: tenant mapping is
 	// by email, so only one the provider verified is used.
 	if c.EmailVerified {
