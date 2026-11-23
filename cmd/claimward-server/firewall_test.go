@@ -85,6 +85,21 @@ func TestRunRefusesABadTenantsFile(t *testing.T) {
 	}
 }
 
+// ⛔ No orgs and no named members: run itself refuses, with no opt-out.
+func TestRunRefusesAnOpenGitHubGate(t *testing.T) {
+	runEnv(t)
+	t.Setenv("GITHUB_ALLOWED_ORGS", "")
+	stop := time.AfterFunc(3*time.Second, func() {
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = p.Signal(os.Interrupt)
+		}
+	})
+	defer stop.Stop()
+	if err := run(quiet); err == nil {
+		t.Fatal("run started with no org allowlist and no named member")
+	}
+}
+
 // ⛔ No ruleset, no server -- through run itself.
 func TestRunDoesNotStartWithoutAFirewall(t *testing.T) {
 	runEnv(t)

@@ -186,9 +186,6 @@ func (s *Store) HasNamedMembers() bool {
 
 // names is whether subject is one of the tenant's pinned accounts.
 func (t Tenant) names(subject string) bool {
-	if subject == "" {
-		return false
-	}
 	for _, id := range t.Pinned {
 		if subject == "github:"+strconv.FormatInt(id, 10) {
 			return true
