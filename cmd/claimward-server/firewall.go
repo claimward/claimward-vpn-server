@@ -10,6 +10,15 @@ import (
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
 )
 
+// newApplier is the kernel's nftables, or a logger under WG_DRYRUN. A variable
+// so a test can make the installation fail.
+var newApplier = func(dryRun bool, log *slog.Logger) fw.Applier {
+	if dryRun {
+		return fw.Discard{Log: log}
+	}
+	return fw.NewNFT()
+}
+
 // loadTenants seeds ts from the tenants file, if one is configured.
 func loadTenants(ts *tenant.Store, path string, log *slog.Logger) error {
 	if path == "" {

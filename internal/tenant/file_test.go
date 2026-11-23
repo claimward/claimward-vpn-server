@@ -124,6 +124,37 @@ func TestSeed(t *testing.T) {
 	}
 }
 
+func TestStoreEdges(t *testing.T) {
+	s := New(nil, nil)
+	if _, ok := s.Get("nope"); ok {
+		t.Error("an absent tenant was found")
+	}
+	if _, err := s.Create(Tenant{}); err == nil {
+		t.Error("a tenant with no id or name was created")
+	}
+	if c, err := s.Create(Tenant{Name: "Chimie"}); err != nil || c.ID != "chimie" {
+		t.Errorf("id from the name: %+v %v", c, err)
+	}
+	if _, err := s.Create(Tenant{ID: "chimie"}); err == nil {
+		t.Error("a duplicate tenant was created")
+	}
+	if _, err := s.Update("nope", Tenant{}); err == nil {
+		t.Error("an absent tenant was updated")
+	}
+	if err := s.Delete(DefaultID); err == nil {
+		t.Error("the default tenant was deleted")
+	}
+	if err := s.Delete("nope"); err == nil {
+		t.Error("an absent tenant was deleted")
+	}
+	if err := s.Delete("chimie"); err != nil {
+		t.Error(err)
+	}
+	if _, ok := s.Get("chimie"); ok {
+		t.Error("a deleted tenant is still there")
+	}
+}
+
 func FuzzParseFile(f *testing.F) {
 	f.Add([]byte(file))
 	f.Add([]byte(`[]`))

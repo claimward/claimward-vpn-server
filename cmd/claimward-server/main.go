@@ -41,7 +41,6 @@ import (
 	"github.com/claimward/claimward-vpn-server/internal/api"
 	"github.com/claimward/claimward-vpn-server/internal/auth"
 	"github.com/claimward/claimward-vpn-server/internal/config"
-	"github.com/claimward/claimward-vpn-server/internal/fw"
 	"github.com/claimward/claimward-vpn-server/internal/grpcsrv"
 	"github.com/claimward/claimward-vpn-server/internal/ipam"
 	"github.com/claimward/claimward-vpn-server/internal/metrics"
@@ -128,11 +127,7 @@ func run(log *slog.Logger) error {
 	// ⛔ Fail closed: what each peer may reach is ENFORCED here, by the
 	// kernel's nftables, before any peer can be enrolled. If the ruleset
 	// cannot be installed the server does not start.
-	var applier fw.Applier = fw.NewNFT()
-	if cfg.DryRun {
-		applier = fw.Discard{Log: log}
-	}
-	fwm, err := startFirewall(cfg.WGInterface, applier, ts, st, log)
+	fwm, err := startFirewall(cfg.WGInterface, newApplier(cfg.DryRun, log), ts, st, log)
 	if err != nil {
 		return err
 	}
