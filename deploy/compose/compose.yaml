@@ -1,0 +1,44 @@
+# Docker Compose. Secrets are files mounted under /run/secrets; the server
+# reads them from $CREDENTIALS_DIRECTORY, set here by hand (no systemd).
+#
+# No image is published yet: build one from this repository and push it where
+# your hosts can pull it, then set `image:`.
+#
+# The WireGuard interface (wg0) must exist on the host, and the server programs
+# it and the host's nftables: host networking and CAP_NET_ADMIN are required.
+services:
+  claimward-server:
+    image: registry.example.org/claimward-vpn-server:v0.6.0
+    network_mode: host
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    restart: unless-stopped
+    environment:
+      CREDENTIALS_DIRECTORY: /run/secrets
+      WG_ENDPOINT: vpn.example.org:51820
+      AUTH_PROVIDER: github
+      GITHUB_ALLOWED_ORGS: example-org
+    secrets:
+      # The container's process uid must own the files, with mode 0400.
+      # Compose (non-Swarm) bind-mounts the host file as it is: chown and chmod
+      # it on the host (`chown 65532 ... && chmod 0400 ...`) and set `user:` to
+      # that uid. In Swarm, `mode: 0400` here is enforced by the engine.
+      - source: wg-private-key
+        mode: 0400
+        uid: "65532"
+      # - { source: goauthn-gateway-secret, mode: 0400, uid: "65532" }
+      # - { source: github-token,           mode: 0400, uid: "65532" }
+      # - { source: admin-token,            mode: 0400, uid: "65532" }
+    user: "65532"
+
+secrets:
+  wg-private-key:
+    file: ./secrets/wg-private-key
+  # goauthn-gateway-secret:
+  #   file: ./secrets/goauthn-gateway-secret
+  # github-token:
+  #   file: ./secrets/github-token
+  # admin-token:
+  #   file: ./secrets/admin-token

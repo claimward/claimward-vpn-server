@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -29,7 +30,7 @@ func TestResolverRefusesWhatIsNotAUserAnswer(t *testing.T) {
 			w.WriteHeader(c.status)
 			_, _ = w.Write([]byte(c.body))
 		}))
-		_, err := NewGitHubResolver(srv.URL)(context.Background(), "alice")
+		_, err := NewGitHubResolver(srv.URL, "tok")(context.Background(), "alice")
 		srv.Close()
 		if err == nil {
 			t.Errorf("%s: accepted", c.name)
@@ -40,7 +41,7 @@ func TestResolverRefusesWhatIsNotAUserAnswer(t *testing.T) {
 		_, _ = w.Write([]byte(good))
 	}))
 	defer ok.Close()
-	if id, err := NewGitHubResolver(ok.URL+"/")(context.Background(), "alice"); err != nil || id != 5 {
+	if id, err := NewGitHubResolver(ok.URL+"/", "tok")(context.Background(), "alice"); err != nil || id != 5 {
 		t.Errorf("good answer: %d, %v", id, err)
 	}
 }
@@ -49,13 +50,56 @@ func TestResolverFailsOnATransportOrURLError(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	url := srv.URL
 	srv.Close() // nothing listens any more
-	if _, err := NewGitHubResolver(url)(context.Background(), "alice"); err == nil {
+	if _, err := NewGitHubResolver(url, "tok")(context.Background(), "alice"); err == nil {
 		t.Error("a refused connection was not an error")
 	}
-	if _, err := NewGitHubResolver("http://bad host")(context.Background(), "alice"); err == nil {
+	if _, err := NewGitHubResolver("http://bad host", "tok")(context.Background(), "alice"); err == nil {
 		t.Error("an invalid base URL was not an error")
 	}
-	if _, err := NewGitHubResolver("http://x")(nil, "alice"); err == nil { //nolint:staticcheck // nil ctx is the point
+	if _, err := NewGitHubResolver("https://x", "tok")(nil, "alice"); err == nil { //nolint:staticcheck // nil ctx is the point
 		t.Error("a nil context was not an error")
+	}
+}
+
+// The resolver sends the github-token as a bearer.
+func TestResolverSendsTheBearer(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"id":5,"login":"alice","type":"User"}`))
+	}))
+	defer srv.Close()
+	if _, err := NewGitHubResolver(srv.URL, "ghp_secret")(context.Background(), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if got != "Bearer ghp_secret" {
+		t.Errorf("Authorization = %q", got)
+	}
+	// "localhost" is loopback too.
+	local := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
+	if _, err := NewGitHubResolver(local, "ghp_secret")(context.Background(), "alice"); err != nil {
+		t.Errorf("localhost: %v", err)
+	}
+}
+
+// With no token the resolver refuses without a request, naming the file.
+func TestResolverWithoutATokenRefuses(t *testing.T) {
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hit = true }))
+	defer srv.Close()
+	_, err := NewGitHubResolver(srv.URL, "")(context.Background(), "alice")
+	if err == nil || !strings.Contains(err.Error(), "github-token") {
+		t.Fatalf("err = %v", err)
+	}
+	if hit {
+		t.Error("a request went out without a token")
+	}
+}
+
+// The token never travels in clear to a remote host.
+func TestResolverSendsTheTokenOnlyOverHTTPSOrLoopback(t *testing.T) {
+	_, err := NewGitHubResolver("http://ghe.example.org", "tok")(context.Background(), "alice")
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("err = %v", err)
 	}
 }

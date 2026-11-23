@@ -1,12 +1,16 @@
-// Package config loads claimward-vpn-server configuration from the environment.
+// Package config loads claimward-vpn-server configuration from the environment
+// and, for secrets, from the credentials directory ($CREDENTIALS_DIRECTORY).
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/claimward/claimward-vpn-server/internal/creds"
 )
 
 // Config is the fully-resolved server configuration.
@@ -22,7 +26,13 @@ type Config struct {
 	GRPCAddr     string // RouteService gRPC listen address, e.g. ":8444"
 	GRPCEndpoint string // host:port advertised to clients for route streaming
 
-	AdminToken string // bearer for the admin WebUI/API; empty disables admin
+	// AdminToken is the bearer for the admin WebUI/API, from the credential
+	// file admin-token; with no such file the admin API is disabled.
+	AdminToken string
+	// GitHubToken is the credential file github-token: the bearer for
+	// GET /users/{login}, which pins a tenant member's login to an ID. Optional
+	// here; the server refuses to start without it when a tenant has members.
+	GitHubToken string
 
 	AuthProvider string // "github" (default), "oidc" or "go-authn"
 
@@ -34,7 +44,7 @@ type Config struct {
 	// list of registered WireGuard keys. The secret is read from a file
 	// only: an environment is copied into every child and every crash dump.
 	GatewayClientID  string
-	GatewaySecret    string        // filled from GOAUTHN_GATEWAY_SECRET_FILE
+	GatewaySecret    string        // credential file goauthn-gateway-secret
 	PeerListInterval time.Duration // how often the list is fetched
 	// SSF makes the gateway also listen to the provider's Shared Signals,
 	// so that a disabling is acted on at once rather than at the next fetch.
@@ -46,8 +56,7 @@ type Config struct {
 	GitHubAllowedOrgs []string // org-membership allowlist (github); required with the github provider
 	WGInterface       string   // kernel interface managed via wgctrl, e.g. "wg0"
 	WGEndpoint        string   // public host:port advertised to clients (required)
-	WGPrivateKey      string   // base64 server private key (or use WGPrivateKeyFile)
-	WGServerPrivKey   string   // resolved private key (internal, filled by Load)
+	WGPrivateKey      string   // base64 server private key, credential file wg-private-key
 	DryRun            bool     // if true, don't touch a real device — log peer ops
 
 	VPNCIDR    string   // pool, e.g. "10.80.0.0/24"; server takes the first host
@@ -65,6 +74,9 @@ type Config struct {
 
 // Load reads configuration from the environment and validates required fields.
 func Load() (*Config, error) {
+	if err := refuseRemovedEnv(); err != nil {
+		return nil, err
+	}
 	c := &Config{
 		ListenAddr:           env("LISTEN_ADDR", ":8443"),
 		TLSCert:              os.Getenv("TLS_CERT"),
@@ -72,7 +84,6 @@ func Load() (*Config, error) {
 		GRPCAddr:             env("GRPC_ADDR", ":8444"),
 		MetricsAddr:          env("METRICS_ADDR", "127.0.0.1:9090"),
 		GRPCEndpoint:         os.Getenv("GRPC_ENDPOINT"),
-		AdminToken:           os.Getenv("ADMIN_TOKEN"),
 		AuthProvider:         env("AUTH_PROVIDER", "github"),
 		OIDCIssuer:           os.Getenv("OIDC_ISSUER"),
 		OIDCClientID:         os.Getenv("OIDC_CLIENT_ID"),
@@ -81,7 +92,6 @@ func Load() (*Config, error) {
 		GitHubAllowedOrgs:    splitCSV(os.Getenv("GITHUB_ALLOWED_ORGS")),
 		WGInterface:          env("WG_INTERFACE", "wg0"),
 		WGEndpoint:           os.Getenv("WG_ENDPOINT"),
-		WGPrivateKey:         os.Getenv("WG_PRIVATE_KEY"),
 		DryRun:               boolEnv("WG_DRYRUN", false),
 		VPNCIDR:              env("VPN_CIDR", "10.80.0.0/24"),
 		PushRoutes:           splitCSV(os.Getenv("PUSH_ROUTES")),
@@ -96,20 +106,27 @@ func Load() (*Config, error) {
 		SSFInterval:          durEnv("GOAUTHN_SSF_INTERVAL", 5*time.Second),
 	}
 
-	if file := os.Getenv("WG_PRIVATE_KEY_FILE"); file != "" && c.WGPrivateKey == "" {
-		b, err := os.ReadFile(file)
-		if err != nil {
-			return nil, fmt.Errorf("read WG_PRIVATE_KEY_FILE: %w", err)
-		}
-		c.WGPrivateKey = strings.TrimSpace(string(b))
+	// Secrets come from the credentials directory and nowhere else.
+	dir := os.Getenv(creds.EnvDir)
+	var err error
+	if c.WGPrivateKey, err = creds.Read(dir, creds.WGPrivateKey); err != nil {
+		return nil, fmt.Errorf("required credential: %w", err)
+	}
+	// admin-token: the admin API is enabled by the file; no file, no admin.
+	if c.AdminToken, err = optional(dir, creds.AdminToken); err != nil {
+		return nil, err
+	}
+	// github-token: optional here; main refuses to start without it when a
+	// tenant names members (the resolver needs it), which Load cannot see.
+	if c.GitHubToken, err = optional(dir, creds.GitHubToken); err != nil {
+		return nil, err
 	}
 	if len(c.PushRoutes) == 0 {
 		c.PushRoutes = []string{c.VPNCIDR}
 	}
 
 	required := map[string]string{
-		"WG_ENDPOINT":    c.WGEndpoint,
-		"WG_PRIVATE_KEY": c.WGPrivateKey,
+		"WG_ENDPOINT": c.WGEndpoint,
 	}
 	switch c.AuthProvider {
 	case "github":
@@ -124,17 +141,8 @@ func Load() (*Config, error) {
 		required["OIDC_ISSUER"] = c.OIDCIssuer
 		required["OIDC_CLIENT_ID"] = c.OIDCClientID
 		required["GOAUTHN_GATEWAY_CLIENT_ID"] = c.GatewayClientID
-		file := os.Getenv("GOAUTHN_GATEWAY_SECRET_FILE")
-		required["GOAUTHN_GATEWAY_SECRET_FILE"] = file
-		if file != "" {
-			b, err := os.ReadFile(file)
-			if err != nil {
-				return nil, fmt.Errorf("read GOAUTHN_GATEWAY_SECRET_FILE: %w", err)
-			}
-			c.GatewaySecret = strings.TrimSpace(string(b))
-			if c.GatewaySecret == "" {
-				return nil, fmt.Errorf("GOAUTHN_GATEWAY_SECRET_FILE %s is empty", file)
-			}
+		if c.GatewaySecret, err = creds.Read(dir, creds.GoAuthnGatewaySecret); err != nil {
+			return nil, fmt.Errorf("required credential (AUTH_PROVIDER=go-authn): %w", err)
 		}
 		if c.PeerListInterval <= 0 {
 			return nil, fmt.Errorf("GOAUTHN_PEER_LIST_INTERVAL must be positive")
@@ -157,6 +165,42 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
 	}
 	return c, nil
+}
+
+// optional reads a credential that may be absent; one that is present but
+// unsafe is still an error.
+func optional(dir, name string) (string, error) {
+	v, err := creds.Read(dir, name)
+	if errors.Is(err, creds.ErrNotFound) {
+		return "", nil
+	}
+	return v, err
+}
+
+// removedEnv maps each variable that used to carry a secret, or name its file,
+// to the credential file that replaces it.
+var removedEnv = []struct{ env, file string }{
+	{"ADMIN_TOKEN", creds.AdminToken},
+	{"WG_PRIVATE_KEY", creds.WGPrivateKey},
+	{"WG_PRIVATE_KEY_FILE", creds.WGPrivateKey},
+	{"GOAUTHN_GATEWAY_SECRET_FILE", creds.GoAuthnGatewaySecret},
+}
+
+// refuseRemovedEnv stops the start when a removed variable is set (non-empty):
+// no fallback, so a secret cannot go on travelling in the environment unseen.
+func refuseRemovedEnv() error {
+	var msgs []string
+	for _, r := range removedEnv {
+		if os.Getenv(r.env) != "" {
+			msgs = append(msgs, fmt.Sprintf("%s is no longer read: unset it and create the credential file %s/%s instead (the file's content is the secret)",
+				r.env, creds.EnvDir, r.file))
+		}
+	}
+	if len(msgs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("claimward-server v0.6.0 takes every secret from the credentials directory $%s, never from the environment (see deploy/README.md): %s",
+		creds.EnvDir, strings.Join(msgs, "; "))
 }
 
 func env(key, def string) string {

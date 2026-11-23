@@ -12,12 +12,18 @@
 // Required environment:
 //
 //	WG_ENDPOINT      public host:port of the WireGuard gateway
-//	WG_PRIVATE_KEY   base64 server private key (or WG_PRIVATE_KEY_FILE)
 //	OIDC_ISSUER      OIDC issuer URL         (AUTH_PROVIDER=oidc or go-authn)
 //	OIDC_CLIENT_ID   expected token audience (AUTH_PROVIDER=oidc or go-authn)
-//	GOAUTHN_GATEWAY_CLIENT_ID, GOAUTHN_GATEWAY_SECRET_FILE
+//	GOAUTHN_GATEWAY_CLIENT_ID
 //	                 the gateway's own client, which reads the list of
 //	                 registered keys          (AUTH_PROVIDER=go-authn)
+//
+// Secrets are files in $CREDENTIALS_DIRECTORY, never environment variables:
+//
+//	wg-private-key           base64 server private key (always)
+//	admin-token              enables the admin API/WebUI (optional)
+//	goauthn-gateway-secret   the gateway client's secret (AUTH_PROVIDER=go-authn)
+//	github-token             required when a tenant names members
 //
 // See internal/config for the full list. Set WG_DRYRUN=true to run without a
 // real WireGuard device (local development).
@@ -71,7 +77,7 @@ func run(log *slog.Logger) error {
 
 	priv, err := wgtypes.ParseKey(cfg.WGPrivateKey)
 	if err != nil {
-		return errors.New("WG_PRIVATE_KEY is not a valid WireGuard key")
+		return errors.New("the wg-private-key credential is not a valid WireGuard key")
 	}
 	serverPub := priv.PublicKey().String()
 
@@ -122,7 +128,7 @@ func run(log *slog.Logger) error {
 	st := store.New()
 	// Named members are pinned to their GitHub numeric IDs as the tenants are
 	// loaded; an unresolvable login stops the start.
-	ts.SetResolver(auth.NewGitHubResolver(cfg.GitHubAPIURL))
+	ts.SetResolver(auth.NewGitHubResolver(cfg.GitHubAPIURL, cfg.GitHubToken))
 	if err := loadTenants(ts, cfg.TenantsFile, log); err != nil {
 		return err
 	}
