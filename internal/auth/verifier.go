@@ -50,8 +50,15 @@ func (v *OIDCVerifier) Verify(ctx context.Context, rawIDToken string) (*Claims, 
 		Groups:        stringList(raw.Groups),
 	}
 
-	if len(v.allowedDomains) > 0 && !domainAllowed(claims.Email, v.allowedDomains) {
-		return nil, fmt.Errorf("email domain not allowed: %q", claims.Email)
+	if len(v.allowedDomains) > 0 {
+		// ⛔ An address the issuer did not verify says nothing about its
+		// holder: anyone may type ceo@corp.example into a profile.
+		if !claims.EmailVerified {
+			return nil, fmt.Errorf("email not verified by the identity provider: %q", claims.Email)
+		}
+		if !domainAllowed(claims.Email, v.allowedDomains) {
+			return nil, fmt.Errorf("email domain not allowed: %q", claims.Email)
+		}
 	}
 	return claims, nil
 }
