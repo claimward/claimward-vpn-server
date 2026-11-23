@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"id\":\"hpc\",\"name\":\"HPC\",\"groups\":[\"hpc\"],\"allowed_ips\":[\"10.2.0.0/16\"],\"policy\":[{\"cidr\":\"10.20.0.5/32\",\"proto\":\"tcp\",\"ports\":[445,88]}]}")
