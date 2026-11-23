@@ -63,6 +63,8 @@ func runEnv(t *testing.T) {
 	t.Setenv("WG_PRIVATE_KEY", "YPnXq6Z6cBZ7bmF3ZyYh8mEYV0Q1qS6mQH2k6jH6s3A=")
 	t.Setenv("LISTEN_ADDR", "127.0.0.1:0")
 	t.Setenv("GRPC_ADDR", "127.0.0.1:0")
+	t.Setenv("METRICS_ADDR", "127.0.0.1:0")
+	t.Setenv("GITHUB_ALLOWED_ORGS", "claimward")
 }
 
 func TestRunRefusesABadTenantsFile(t *testing.T) {

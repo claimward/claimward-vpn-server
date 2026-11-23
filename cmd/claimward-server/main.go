@@ -178,6 +178,8 @@ func run(log *slog.Logger) error {
 	if !secure {
 		log.Warn("gRPC RouteService without TLS: clients send their bearer token in it, and refuse to except on loopback -- set TLS_CERT/TLS_KEY")
 	}
+	opts = append(opts, grpcLimits()...)
+	grpcLn = limitConns(grpcLn)
 	gs := grpc.NewServer(append(opts, grpc.StreamInterceptor(grpcsrv.AuthStreamInterceptor(verifier)))...)
 	routespb.RegisterRouteServiceServer(gs, grpcsrv.New(ts, st))
 	go gs.Serve(grpcLn) //nolint:errcheck
@@ -193,22 +195,28 @@ func run(log *slog.Logger) error {
 	// Root mux: enrollment API (catch-all) + Prometheus metrics + admin UI/API.
 	root := http.NewServeMux()
 	root.Handle("/", srv.Handler())
-	root.Handle("GET /metrics", m.Handler())
+	// ⛔ /metrics is NOT on this public mux: it names every tenant. It has
+	// its own listener, loopback by default (METRICS_ADDR).
 	adminSrv := admin.New(ts, st, cfg.AdminToken, adminui.FS(), log)
 	adminSrv.Register(root)
 	log.Info("admin UI", "enabled", adminSrv.Enabled(), "path", "/admin/")
 
-	httpSrv := &http.Server{
-		Addr:              cfg.ListenAddr,
-		Handler:           root,
-		ReadHeaderTimeout: 10 * time.Second,
+	httpSrv := newHTTPServer(cfg.ListenAddr, root)
+
+	metricsSrv := newHTTPServer(cfg.MetricsAddr, metricsMux(m))
+	metricsLn, err := net.Listen("tcp", cfg.MetricsAddr)
+	if err != nil {
+		return err
 	}
+	go metricsSrv.Serve(limitConns(metricsLn)) //nolint:errcheck
+	log.Info("metrics listening", "addr", metricsLn.Addr().String())
 
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = httpSrv.Shutdown(shutCtx)
+		_ = metricsSrv.Shutdown(shutCtx)
 	}()
 
 	log.Info("claimward-server listening",
@@ -217,10 +225,10 @@ func run(log *slog.Logger) error {
 		"auth", cfg.AuthProvider, "server_pubkey", serverPub, "dry_run", cfg.DryRun)
 
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
-		err = httpSrv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
+		err = serveLimited(httpSrv, cfg.TLSCert, cfg.TLSKey)
 	} else {
 		log.Warn("serving plain HTTP — terminate TLS at a proxy or set TLS_CERT/TLS_KEY in production")
-		err = httpSrv.ListenAndServe()
+		err = serveLimited(httpSrv, "", "")
 	}
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
