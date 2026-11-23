@@ -125,7 +125,11 @@ func TestWatchRefusesAnExpiredToken(t *testing.T) {
 	ts.Create(tenant.Tenant{ID: "hpc", Groups: []string{"hpc"}, AllowedIPs: []string{"10.2.0.0/16"}})
 	peers := store.New()
 	peers.Put(&store.Peer{PublicKey: "k", Subject: "sub-carol", Tenant: "hpc"})
-	if _, err := watch(t, New(ts, peers), c, "k"); err == nil {
+	st, err := watch(t, New(ts, peers), c, "k")
+	if err == nil {
 		t.Error("an expired token was streamed to")
+	}
+	if len(st.sent) != 0 {
+		t.Errorf("an expired token was sent %d update(s)", len(st.sent))
 	}
 }
