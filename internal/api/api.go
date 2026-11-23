@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/claimward/claimward-vpn-client/pkg/protocol"
@@ -35,6 +36,10 @@ type Server struct {
 	metrics      *metrics.Metrics
 	serverPubKey string
 	log          *slog.Logger
+
+	// mu serialises every change to the set of enrolled peers and their
+	// addresses (enroll, deregister, reap, reconcile).
+	mu sync.Mutex
 
 	// peers, when set, is the provider's list of registered keys: a key is
 	// enrolled only if its owner registered it there (AUTH_PROVIDER=go-authn).
@@ -95,6 +100,8 @@ func (s *Server) registered(key string, claims *auth.Claims, lease time.Time) (t
 // Reconcile drops every enrolled peer allowed no longer: a key the provider
 // took back, or one now registered to somebody else.
 func (s *Server) Reconcile(allowed func(key, subject string) bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	removed := false
 	defer func() {
 		if removed {
@@ -216,8 +223,16 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 		return
 	}
 
+	// ⛔ One critical section from Get to Put: two concurrent enrollments of one
+	// key used to both see "not enrolled", allocate two addresses and leave one
+	// owned by nobody. Departures take the same lock, so an address is never
+	// released under an enrollment that is about to reuse it.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// Reuse the existing assignment if this device is already enrolled.
 	var ip net.IP
+	allocated := false // true only for an address taken in THIS request
 	if existing := s.store.Get(req.PublicKey); existing != nil {
 		// ⛔ A public key is public: anybody can read one off a peer list or
 		// a configuration. Enrolling it again under another identity used to
@@ -230,15 +245,26 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 		}
 		ip = existing.IP
 	} else {
+		// ⛔ A per-subject cap, checked BEFORE Allocate: one identity could
+		// otherwise enrol keys until the pool was empty for everybody.
+		if s.devicesOf(claims.Subject) >= s.maxDevices() {
+			writeErr(w, http.StatusTooManyRequests, "too_many_devices", "this account already has the maximum number of enrolled devices")
+			return
+		}
 		ip, err = s.alloc.Allocate()
 		if err != nil {
 			writeErr(w, http.StatusServiceUnavailable, "pool_exhausted", err.Error())
 			return
 		}
+		allocated = true
 	}
 
 	if err := s.gw.AddPeer(pub, ip); err != nil {
-		s.alloc.Release(ip)
+		// Release only what this request allocated: on a re-enroll the
+		// address still belongs to the live peer.
+		if allocated {
+			s.alloc.Release(ip)
+		}
 		s.log.Error("gateway add peer failed", "err", err)
 		writeErr(w, http.StatusInternalServerError, "gateway_error", "could not program gateway")
 		return
@@ -285,6 +311,27 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	})
 }
 
+// DefaultMaxDevicesPerSubject is the cap when none is configured.
+const DefaultMaxDevicesPerSubject = 5
+
+func (s *Server) maxDevices() int {
+	if s.cfg.MaxDevicesPerSubject > 0 {
+		return s.cfg.MaxDevicesPerSubject
+	}
+	return DefaultMaxDevicesPerSubject
+}
+
+// devicesOf counts the peers enrolled by subject.
+func (s *Server) devicesOf(subject string) int {
+	n := 0
+	for _, p := range s.store.List() {
+		if p.Subject == subject {
+			n++
+		}
+	}
+	return n
+}
+
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, claims *auth.Claims) {
 	var req protocol.HeartbeatRequest
 	if !decode(w, r, &req) {
@@ -317,6 +364,8 @@ func (s *Server) handleDeregister(w http.ResponseWriter, r *http.Request, claims
 	if !decode(w, r, &req) {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	peer := s.store.Get(req.PublicKey)
 	if peer == nil {
 		w.WriteHeader(http.StatusNoContent)
@@ -341,6 +390,8 @@ func (s *Server) handleDeregister(w http.ResponseWriter, r *http.Request, claims
 
 // ReapExpired removes peers whose lease has ended. Called periodically.
 func (s *Server) ReapExpired() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	now := time.Now()
 	expired := s.store.Expired(now)
 	defer func() {
