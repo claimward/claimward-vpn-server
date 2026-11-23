@@ -42,7 +42,12 @@ jobs:
           go-version: '1.27.3'
       - run: sudo modprobe nf_tables || true
       - run: CGO_ENABLED=0 go test -c -o fw.test ./internal/fw
+      # The runner's Docker leaves FORWARD at DROP in its own table, which would
+      # drop forwarded packets regardless of claimward's table.
+      - run: sudo iptables -P FORWARD ACCEPT || true
       - run: sudo CW_REQUIRE_NETNS=1 ./fw.test -test.v -test.count=1 -test.run 'TestNetnsPolicyIsEnforced'
+      - if: failure()
+        run: sudo nft list ruleset; sudo iptables -S FORWARD || true
 
   crossbuild:
     name: cross-build (${{ matrix.goarch }})

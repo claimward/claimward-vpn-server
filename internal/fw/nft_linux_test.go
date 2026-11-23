@@ -208,7 +208,7 @@ func TestNetnsPolicyIsEnforced(t *testing.T) {
 
 	// Services on every port the matrix asks about, so that a refusal can only
 	// be the firewall's.
-	for _, p := range []string{"445", "446", "88", "22", "9005", "9011"} {
+	for _, p := range []string{"445", "446", "88", "2222", "9005", "9011"} {
 		serveTCP(t, "cwsrv", "10.98.0.2:"+p)
 		serveTCP(t, "", "10.99.0.1:"+p)
 	}
@@ -244,14 +244,14 @@ func TestNetnsPolicyIsEnforced(t *testing.T) {
 		{"tcp", "10.98.0.2:9005", true}, // in the range, through the /24 mask
 		{"tcp", "10.98.0.2:9011", false},
 		{"tcp", "10.98.0.2:446", false},
-		{"tcp", "10.98.0.2:22", false},
+		{"tcp", "10.98.0.2:2222", false},
 		{"udp", "10.98.0.2:88", false}, // tcp-only there
 		{"udp", "10.98.0.2:445", false},
 		// to the gateway host itself (INPUT)
 		{"tcp", "10.99.0.1:445", true},
 		{"tcp", "10.99.0.1:88", true},
 		{"udp", "10.99.0.1:88", true},
-		{"tcp", "10.99.0.1:22", false},
+		{"tcp", "10.99.0.1:2222", false},
 		{"udp", "10.99.0.1:53", false},
 		{"udp", "10.99.0.1:445", false},
 	}
