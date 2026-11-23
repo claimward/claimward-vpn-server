@@ -20,6 +20,9 @@ func openNoFollow(path string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), path), nil
 }
 
+// getuid is the process's uid; a variable so a test can play another owner.
+var getuid = os.Getuid
+
 func isSymlinkError(err error) bool {
 	return errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.EMLINK)
 }
@@ -37,14 +40,9 @@ func checkFile(f *os.File, path, name string) error {
 	if st.Mode&0o077 != 0 {
 		return refuse(path, name, fmt.Sprintf("has mode %04o: readable or writable by group or other", st.Mode&0o777))
 	}
-	if int(st.Uid) != os.Getuid() {
-		return refuse(path, name, fmt.Sprintf("is owned by uid %d, not by this process (uid %d)", st.Uid, os.Getuid()))
+	if int(st.Uid) != getuid() {
+		return refuse(path, name, fmt.Sprintf("is owned by uid %d, not by this process (uid %d)", st.Uid, getuid()))
 	}
-	if st.Size == 0 {
-		return fmt.Errorf("credential %s is empty, refused", path)
-	}
-	if st.Size > MaxSize {
-		return fmt.Errorf("credential %s is %d bytes, larger than %d, refused", path, st.Size, MaxSize)
-	}
+	// Size is judged by Read, on what it actually read (empty, over MaxSize).
 	return nil
 }

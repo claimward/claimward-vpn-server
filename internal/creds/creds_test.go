@@ -4,6 +4,7 @@ package creds
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,7 +68,36 @@ func TestRefusesASymlink(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(dir, GitHubToken)); err != nil {
 		t.Fatal(err)
 	}
-	refused(t, dir, GitHubToken, "symbolic link")
+	refused(t, dir, GitHubToken, "is a symbolic link, refused")
+}
+
+func TestRefusesAnotherOwner(t *testing.T) {
+	dir := t.TempDir()
+	put(t, dir, AdminToken, "t", 0o400)
+	old := getuid
+	t.Cleanup(func() { getuid = old })
+	getuid = func() int { return os.Getuid() + 1 }
+	refused(t, dir, AdminToken, "is owned by uid")
+}
+
+func TestReadFailureIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	put(t, dir, AdminToken, "t", 0o400)
+	old := readAll
+	t.Cleanup(func() { readAll = old })
+	readAll = func(io.Reader) ([]byte, error) { return nil, errors.New("EIO") }
+	refused(t, dir, AdminToken, "EIO")
+}
+
+func TestFstatFailureIsAnError(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close() // Fstat on a closed descriptor fails
+	if err := checkFile(f, "p", AdminToken); err == nil {
+		t.Fatal("a closed descriptor passed the check")
+	}
 }
 
 func TestRefusesADanglingSymlink(t *testing.T) {
@@ -145,7 +175,7 @@ func TestMissingIsNotFound(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 	_, err = Read("", GoAuthnGatewaySecret)
-	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), EnvDir) {
+	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), EnvDir+" is not set") {
 		t.Fatalf("unset dir: %v", err)
 	}
 }

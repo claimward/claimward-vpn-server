@@ -37,6 +37,9 @@ const MaxSize = 64 << 10
 // credential: the directory is not set, or the file is not in it.
 var ErrNotFound = errors.New("credential not found")
 
+// readAll is io.ReadAll; a variable so a test can make the read fail.
+var readAll = io.ReadAll
+
 // Names lists the credential names Read accepts.
 func Names() []string {
 	return []string{GitHubToken, WGPrivateKey, AdminToken, GoAuthnGatewaySecret}
@@ -79,7 +82,7 @@ func Read(dir, name string) (string, error) {
 	if err := checkFile(f, path, name); err != nil {
 		return "", err
 	}
-	b, err := io.ReadAll(io.LimitReader(f, MaxSize+1))
+	b, err := readAll(io.LimitReader(f, MaxSize+1))
 	if err != nil {
 		return "", fmt.Errorf("credential %s: %w", path, err)
 	}
