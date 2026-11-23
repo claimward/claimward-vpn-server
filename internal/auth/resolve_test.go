@@ -75,6 +75,11 @@ func TestResolverSendsTheBearer(t *testing.T) {
 	if got != "Bearer ghp_secret" {
 		t.Errorf("Authorization = %q", got)
 	}
+	// "localhost" is loopback too.
+	local := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
+	if _, err := NewGitHubResolver(local, "ghp_secret")(context.Background(), "alice"); err != nil {
+		t.Errorf("localhost: %v", err)
+	}
 }
 
 // With no token the resolver refuses without a request, naming the file.
