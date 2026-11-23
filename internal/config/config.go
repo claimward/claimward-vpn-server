@@ -39,7 +39,9 @@ type Config struct {
 	SSFInterval time.Duration
 
 	GitHubAPIURL      string   // default https://api.github.com (set for GHE)
-	GitHubAllowedOrgs []string // optional org-membership allowlist (github)
+	GitHubAllowedOrgs []string // org-membership allowlist (github); required unless GitHubAllowAnyAccount
+	// GitHubAllowAnyAccount is the explicit opt-in to admit any GitHub account.
+	GitHubAllowAnyAccount bool
 
 	WGInterface     string // kernel interface managed via wgctrl, e.g. "wg0"
 	WGEndpoint      string // public host:port advertised to clients (required)
@@ -60,32 +62,33 @@ type Config struct {
 // Load reads configuration from the environment and validates required fields.
 func Load() (*Config, error) {
 	c := &Config{
-		ListenAddr:        env("LISTEN_ADDR", ":8443"),
-		TLSCert:           os.Getenv("TLS_CERT"),
-		TLSKey:            os.Getenv("TLS_KEY"),
-		GRPCAddr:          env("GRPC_ADDR", ":8444"),
-		GRPCEndpoint:      os.Getenv("GRPC_ENDPOINT"),
-		AdminToken:        os.Getenv("ADMIN_TOKEN"),
-		AuthProvider:      env("AUTH_PROVIDER", "github"),
-		OIDCIssuer:        os.Getenv("OIDC_ISSUER"),
-		OIDCClientID:      os.Getenv("OIDC_CLIENT_ID"),
-		AllowedDomains:    splitCSV(os.Getenv("OIDC_ALLOWED_DOMAINS")),
-		GitHubAPIURL:      os.Getenv("GITHUB_API_URL"),
-		GitHubAllowedOrgs: splitCSV(os.Getenv("GITHUB_ALLOWED_ORGS")),
-		WGInterface:       env("WG_INTERFACE", "wg0"),
-		WGEndpoint:        os.Getenv("WG_ENDPOINT"),
-		WGPrivateKey:      os.Getenv("WG_PRIVATE_KEY"),
-		DryRun:            boolEnv("WG_DRYRUN", false),
-		VPNCIDR:           env("VPN_CIDR", "10.80.0.0/24"),
-		PushRoutes:        splitCSV(os.Getenv("PUSH_ROUTES")),
-		TenantsFile:       os.Getenv("TENANTS_FILE"),
-		DNS:               splitCSV(os.Getenv("DNS")),
-		Keepalive:         intEnv("KEEPALIVE", 25),
-		LeaseTTL:          durEnv("LEASE_TTL", 24*time.Hour),
-		GatewayClientID:   os.Getenv("GOAUTHN_GATEWAY_CLIENT_ID"),
-		PeerListInterval:  durEnv("GOAUTHN_PEER_LIST_INTERVAL", 30*time.Second),
-		SSF:               boolEnv("GOAUTHN_SSF", false),
-		SSFInterval:       durEnv("GOAUTHN_SSF_INTERVAL", 5*time.Second),
+		ListenAddr:            env("LISTEN_ADDR", ":8443"),
+		TLSCert:               os.Getenv("TLS_CERT"),
+		TLSKey:                os.Getenv("TLS_KEY"),
+		GRPCAddr:              env("GRPC_ADDR", ":8444"),
+		GRPCEndpoint:          os.Getenv("GRPC_ENDPOINT"),
+		AdminToken:            os.Getenv("ADMIN_TOKEN"),
+		AuthProvider:          env("AUTH_PROVIDER", "github"),
+		OIDCIssuer:            os.Getenv("OIDC_ISSUER"),
+		OIDCClientID:          os.Getenv("OIDC_CLIENT_ID"),
+		AllowedDomains:        splitCSV(os.Getenv("OIDC_ALLOWED_DOMAINS")),
+		GitHubAPIURL:          os.Getenv("GITHUB_API_URL"),
+		GitHubAllowedOrgs:     splitCSV(os.Getenv("GITHUB_ALLOWED_ORGS")),
+		GitHubAllowAnyAccount: boolEnv("GITHUB_ALLOW_ANY_ACCOUNT", false),
+		WGInterface:           env("WG_INTERFACE", "wg0"),
+		WGEndpoint:            os.Getenv("WG_ENDPOINT"),
+		WGPrivateKey:          os.Getenv("WG_PRIVATE_KEY"),
+		DryRun:                boolEnv("WG_DRYRUN", false),
+		VPNCIDR:               env("VPN_CIDR", "10.80.0.0/24"),
+		PushRoutes:            splitCSV(os.Getenv("PUSH_ROUTES")),
+		TenantsFile:           os.Getenv("TENANTS_FILE"),
+		DNS:                   splitCSV(os.Getenv("DNS")),
+		Keepalive:             intEnv("KEEPALIVE", 25),
+		LeaseTTL:              durEnv("LEASE_TTL", 24*time.Hour),
+		GatewayClientID:       os.Getenv("GOAUTHN_GATEWAY_CLIENT_ID"),
+		PeerListInterval:      durEnv("GOAUTHN_PEER_LIST_INTERVAL", 30*time.Second),
+		SSF:                   boolEnv("GOAUTHN_SSF", false),
+		SSFInterval:           durEnv("GOAUTHN_SSF_INTERVAL", 5*time.Second),
 	}
 
 	if file := os.Getenv("WG_PRIVATE_KEY_FILE"); file != "" && c.WGPrivateKey == "" {
@@ -105,7 +108,12 @@ func Load() (*Config, error) {
 	}
 	switch c.AuthProvider {
 	case "github":
-		// No extra required vars; GITHUB_ALLOWED_ORGS is recommended for authz.
+		// ⛔ Fail closed: with no org allowlist EVERY GitHub account is let in,
+		// so the operator must either name the orgs or say, on purpose, that
+		// any account will do.
+		if len(c.GitHubAllowedOrgs) == 0 && !c.GitHubAllowAnyAccount {
+			return nil, fmt.Errorf("AUTH_PROVIDER=github needs GITHUB_ALLOWED_ORGS (any GitHub account would otherwise enroll); set GITHUB_ALLOW_ANY_ACCOUNT=true to accept that on purpose")
+		}
 	case "oidc":
 		required["OIDC_ISSUER"] = c.OIDCIssuer
 		required["OIDC_CLIENT_ID"] = c.OIDCClientID
