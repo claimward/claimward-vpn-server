@@ -26,7 +26,7 @@ shapes are defined in
 | `POST /api/v1/deregister` | Remove the peer |
 | `GET /api/v1/tenants` | The tenants the caller may connect to (see [Tenants](#tenants)) |
 | `GET /healthz` | Liveness |
-| `GET /metrics` | Prometheus exposition |
+| `GET /metrics` | Prometheus exposition — on the separate `METRICS_ADDR` listener, not this port |
 
 ## Flow
 
@@ -108,7 +108,10 @@ Beyond the enrollment API, the server exposes:
 - **Admin API + WebUI** — a token-guarded (`ADMIN_TOKEN`) surface under `/admin/`:
   a `GET /admin/api/overview`, tenant CRUD at `/admin/api/tenants[...]`, and an
   embedded Svelte single-page app. Disabled unless `ADMIN_TOKEN` is set.
-- **Prometheus metrics** — exposition at `/metrics`.
+- **Prometheus metrics** — exposition at `/metrics` on its own listener,
+  `METRICS_ADDR` (default `127.0.0.1:9090`), never on the enrollment port.
+  Every listener has read, write and idle timeouts and a connection cap;
+  the gRPC server enforces keepalive and a per-connection stream limit.
 
 ## Tenants
 
@@ -221,6 +224,7 @@ not be skipped there.
 | `MAX_DEVICES_PER_SUBJECT` | | `5` | most devices one account may have enrolled at once (a further new key gets 429 `too_many_devices`) |
 | `LISTEN_ADDR` | | `:8443` | HTTP control-plane listen address |
 | `GRPC_ADDR` | | `:8444` | RouteService gRPC listen address |
+| `METRICS_ADDR` | | `127.0.0.1:9090` | where `/metrics` is served, on its own listener (it names every tenant, so it is loopback by default; expose it only on a trusted network) |
 | `GRPC_ENDPOINT` | | — | `host:port` advertised to clients for route streaming |
 | `ADMIN_TOKEN` | | — | bearer for the admin API/WebUI; empty disables admin |
 | `DEBUG` | | — | any value enables debug logging |
