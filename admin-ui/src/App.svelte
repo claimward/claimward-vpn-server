@@ -62,7 +62,7 @@
   }
 
   async function remove(t) {
-    if (!confirm(`Delete tenant "${t.name || t.id}"? Connected clients fall back to default.`)) return
+    if (!confirm(`Delete tenant "${t.name || t.id}"? Its members lose access to it.`)) return
     try {
       await api.deleteTenant(t.id)
       await refresh()

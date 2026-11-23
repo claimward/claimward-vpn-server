@@ -33,6 +33,7 @@ type Server struct {
 	store        *store.Store
 	gw           wg.Gateway
 	tenants      *tenant.Store
+	afterChoose  func() // test seam, nil in production
 	metrics      *metrics.Metrics
 	serverPubKey string
 	log          *slog.Logger
@@ -229,6 +230,9 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	if code != 0 {
 		writeErr(w, code, why[0], why[1])
 		return
+	}
+	if s.afterChoose != nil {
+		s.afterChoose() // test seam: the tenant may be deleted right here
 	}
 	// An unknown tenant is an error, never the default tenant's routes.
 	rs, err := s.tenants.Routes(tenantID)

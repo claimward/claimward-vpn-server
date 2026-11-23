@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/claimward/claimward-vpn-client/pkg/routespb"
 	"github.com/claimward/claimward-vpn-server/internal/auth"
 	"github.com/claimward/claimward-vpn-server/internal/store"
@@ -115,6 +118,24 @@ func TestWatchEndsAtTokenExpiry(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the stream outlived its token")
+	}
+}
+
+// A tenant deleted between the membership check and the subscription is
+// NotFound, and nothing is sent.
+func TestWatchRefusesATenantDeletedUnderIt(t *testing.T) {
+	ts := tenant.New([]string{"10.80.0.0/24"}, nil)
+	ts.Create(tenant.Tenant{ID: "hpc", Groups: []string{"hpc"}, AllowedIPs: []string{"10.2.0.0/16"}})
+	peers := store.New()
+	peers.Put(&store.Peer{PublicKey: "k", Subject: "sub-carol", Tenant: "hpc"})
+	srv := New(ts, peers)
+	srv.beforeSubscribe = func() { _ = ts.Delete("hpc") }
+	st, err := watch(t, srv, carol(), "k")
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("err = %v, want NotFound", err)
+	}
+	if len(st.sent) != 0 {
+		t.Errorf("%d update(s) sent for a vanished tenant", len(st.sent))
 	}
 }
 

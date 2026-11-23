@@ -19,6 +19,7 @@ func TestResolverRefusesWhatIsNotAUserAnswer(t *testing.T) {
 		{"server error", 500, good},
 		{"not json", 200, "<html>"},
 		{"truncated json", 200, `{"id":5,`},
+		{"complete fields, unterminated object", 200, `{"id":5,"login":"alice","type":"User"`},
 		{"organisation", 200, `{"id":5,"login":"alice","type":"Organization"}`},
 		{"no id", 200, `{"id":0,"login":"alice","type":"User"}`},
 		{"other login", 200, `{"id":5,"login":"mallory","type":"User"}`},
