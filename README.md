@@ -202,7 +202,7 @@ not be skipped there.
 | `GITHUB_API_URL` | | `https://api.github.com` | set for GitHub Enterprise |
 | `OIDC_ISSUER` | when `oidc` or `go-authn` | — | issuer URL (discovery) |
 | `OIDC_CLIENT_ID` | when `oidc` or `go-authn` | — | expected token audience |
-| `OIDC_ALLOWED_DOMAINS` | | — | CSV email-domain allowlist (oidc authz) |
+| `OIDC_ALLOWED_DOMAINS` | | — | CSV email-domain allowlist (oidc authz); only an address the IdP marks `email_verified` counts |
 | `GOAUTHN_GATEWAY_CLIENT_ID` | when `go-authn` | — | this gateway's own client at the go-authn provider (`wireguard_peers`) |
 | `GOAUTHN_GATEWAY_SECRET_FILE` | when `go-authn` | — | its secret, **from a file only** |
 | `GOAUTHN_PEER_LIST_INTERVAL` | | `30s` | how often the list of registered keys is fetched |
