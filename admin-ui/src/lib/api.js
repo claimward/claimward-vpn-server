@@ -1,4 +1,4 @@
-// Thin client for the admin API. The ADMIN_TOKEN is held client-side (the SPA
+// Thin client for the admin API. The admin-token credential is held client-side (the SPA
 // itself is served unauthenticated) and presented as a bearer on every call.
 const TOKEN_KEY = 'claimward.admin.token'
 

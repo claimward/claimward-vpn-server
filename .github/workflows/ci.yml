@@ -76,6 +76,20 @@ jobs:
       - if: failure()
         run: sudo nft list ruleset; sudo iptables -S FORWARD || true
 
+  # The Kubernetes rule (root-owned 0440 file, group = the pod's gid or fsGroup)
+  # needs a file really owned by root: chown needs root, so this lane runs
+  # the credentials tests as root and a skip there is a failure.
+  creds-root:
+    name: credentials as root (Kubernetes ownership rule)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.4'
+      - run: CGO_ENABLED=0 go test -c -o creds.test ./internal/creds
+      - run: sudo CW_REQUIRE_ROOT=1 ./creds.test -test.v -test.count=1 -test.run 'TestRootOwnedFilesThroughRead'
+
   crossbuild:
     name: cross-build (${{ matrix.goarch }})
     runs-on: ubuntu-latest

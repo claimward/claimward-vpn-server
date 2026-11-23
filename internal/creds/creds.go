@@ -114,8 +114,10 @@ func where(name string) string {
 
 // fix is the exact remedy for a file that is too open or not the process's.
 func fix(name string) string {
-	return "Swarm: `mode: 0400` on the secret; Kubernetes: `defaultMode: 0400` on the Secret volume, " +
-		"with fsGroup/runAsUser so the pod's uid owns the files; Podman: `--secret " + name + ",mode=0400`; " +
+	return "Swarm: `mode: 0400` on the secret; Kubernetes: `defaultMode: 0440` on the Secret volume " +
+		"and `fsGroup: <gid>` with `runAsUser: <uid>` / `runAsGroup: <gid>` in the pod securityContext " +
+		"(the files are root:<fsGroup>, mode 0440, which the server accepts; 0444 or 0644 it refuses); " +
+		"Podman: `--secret " + name + ",mode=0400`; " +
 		"otherwise: `chown <service user> " + EnvDir + "/" + name + " && chmod 0400 " + EnvDir + "/" + name + "`"
 }
 

@@ -27,8 +27,57 @@ func isSymlinkError(err error) bool {
 	return errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.EMLINK)
 }
 
-// checkFile judges the open descriptor: regular file, no group or other
-// access, owned by this process's uid.
+// getegid and getgroups are the process's effective gid and supplementary
+// groups; variables so a test can play another group.
+var (
+	getegid   = os.Getegid
+	getgroups = os.Getgroups
+)
+
+// inProcessGroup reports whether gid is the effective gid or one of the
+// supplementary groups. Kubernetes applies fsGroup as a supplementary group.
+func inProcessGroup(gid int) bool {
+	if gid == getegid() {
+		return true
+	}
+	groups, err := getgroups()
+	if err != nil {
+		return false
+	}
+	for _, g := range groups {
+		if g == gid {
+			return true
+		}
+	}
+	return false
+}
+
+// judge decides on a file's mode, owner and group. Two shapes are accepted:
+//   - the process's own file with no group or other access (0400, 0600);
+//   - a root-owned file of mode exactly 0440 whose group is the process's
+//     effective gid or one of its supplementary groups: what a Kubernetes
+//     Secret volume holds with defaultMode 0440 and fsGroup, where the files
+//     can only belong to root and the pod need not run as root.
+//
+// It returns the reason for a refusal, "" for an acceptance.
+func judge(mode, uid, gid uint32) string {
+	perm := mode & 0o777
+	if perm&0o077 == 0 && int(uid) == getuid() {
+		return ""
+	}
+	if uid == 0 && perm == 0o440 {
+		if inProcessGroup(int(gid)) {
+			return ""
+		}
+		return fmt.Sprintf("is owned by root with mode 0440 but its group %d is neither this process's gid (%d) nor one of its supplementary groups", gid, getegid())
+	}
+	if perm&0o077 != 0 {
+		return fmt.Sprintf("has mode %04o: readable or writable by group or other", perm)
+	}
+	return fmt.Sprintf("is owned by uid %d, not by this process (uid %d)", uid, getuid())
+}
+
+// checkFile judges the open descriptor: a regular file, accepted by judge.
 func checkFile(f *os.File, path, name string) error {
 	var st syscall.Stat_t
 	if err := syscall.Fstat(int(f.Fd()), &st); err != nil {
@@ -37,11 +86,8 @@ func checkFile(f *os.File, path, name string) error {
 	if st.Mode&syscall.S_IFMT != syscall.S_IFREG {
 		return refuse(path, name, "is not a regular file")
 	}
-	if st.Mode&0o077 != 0 {
-		return refuse(path, name, fmt.Sprintf("has mode %04o: readable or writable by group or other", st.Mode&0o777))
-	}
-	if int(st.Uid) != getuid() {
-		return refuse(path, name, fmt.Sprintf("is owned by uid %d, not by this process (uid %d)", st.Uid, getuid()))
+	if why := judge(uint32(st.Mode), st.Uid, st.Gid); why != "" {
+		return refuse(path, name, why)
 	}
 	// Size is judged by Read, on what it actually read (empty, over MaxSize).
 	return nil

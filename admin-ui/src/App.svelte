@@ -101,14 +101,14 @@
       <form class="card w-full max-w-sm bg-base-200 shadow-xl" onsubmit={login}>
         <div class="card-body gap-4">
           <h2 class="card-title">Admin sign in</h2>
-          <p class="text-sm opacity-70">Enter the server's <code>ADMIN_TOKEN</code>.</p>
+          <p class="text-sm opacity-70">Enter the contents of the server's <code>admin-token</code> credential.</p>
           {#if loginError}
             <div class="alert alert-error py-2 text-sm">{loginError}</div>
           {/if}
           <input
             class="input input-bordered font-mono"
             type="password"
-            placeholder="ADMIN_TOKEN"
+            placeholder="admin-token"
             bind:value={tokenInput}
             autocomplete="off"
           />
