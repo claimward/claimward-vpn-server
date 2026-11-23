@@ -72,6 +72,9 @@ func (n *NFT) Apply(rs Ruleset) error {
 				nc.Hooknum = nftables.ChainHookForward
 			}
 			nc.Priority = nftables.ChainPriorityFilter
+			if ch.Mangle {
+				nc.Priority = nftables.ChainPriorityMangle
+			}
 			// accept: only the rules below drop, and only what arrives on the
 			// wg interface. Everything else on the host is not ours to judge.
 			nc.Policy = &accept
@@ -93,6 +96,23 @@ func (n *NFT) Apply(rs Ruleset) error {
 	return nil
 }
 
+// mssClamp is `tcp flags syn tcp option maxseg size > N tcp option maxseg
+// size set N`. The kernel fixes the TCP checksum when it rewrites the option;
+// a SYN without the option fails the load and the rule is skipped.
+func mssClamp(n uint16) []expr.Any {
+	const synFlag = 0x02
+	size := binaryutil.BigEndian.PutUint16(n)
+	return []expr.Any{
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 13, Len: 1},
+		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 1, Mask: []byte{synFlag}, Xor: []byte{0}},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{synFlag}},
+		&expr.Exthdr{DestRegister: 1, Type: unix.TCPOPT_MAXSEG, Offset: 2, Len: 2, Op: expr.ExthdrOpTcpopt},
+		&expr.Cmp{Op: expr.CmpOpGt, Register: 1, Data: size},
+		&expr.Immediate{Register: 1, Data: size},
+		&expr.Exthdr{SourceRegister: 1, Type: unix.TCPOPT_MAXSEG, Offset: 2, Len: 2, Op: expr.ExthdrOpTcpopt},
+	}
+}
+
 func exprsFor(r Rule, sets map[string]*nftables.Set) ([]expr.Any, error) {
 	var e []expr.Any
 	if r.Iface != "" {
@@ -104,6 +124,24 @@ func exprsFor(r Rule, sets map[string]*nftables.Set) ([]expr.Any, error) {
 		e = append(e,
 			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: name})
+	}
+	if r.OIface != "" {
+		if len(r.OIface) >= unix.IFNAMSIZ {
+			return nil, fmt.Errorf("interface name %q is too long", r.OIface)
+		}
+		name := make([]byte, unix.IFNAMSIZ)
+		copy(name, r.OIface)
+		e = append(e,
+			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: name})
+	}
+	if r.IPv6 {
+		if r.IPv4 || r.SrcSet != "" || r.Dst.IsValid() {
+			return nil, fmt.Errorf("a rule is IPv4 or IPv6, not both")
+		}
+		e = append(e,
+			&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV6}})
 	}
 	if r.IPv4 || r.SrcSet != "" || r.Dst.IsValid() {
 		e = append(e,
@@ -156,6 +194,15 @@ func exprsFor(r Rule, sets map[string]*nftables.Set) ([]expr.Any, error) {
 				&expr.Cmp{Op: expr.CmpOpGte, Register: 1, Data: binaryutil.BigEndian.PutUint16(p.Lo)},
 				&expr.Cmp{Op: expr.CmpOpLte, Register: 1, Data: binaryutil.BigEndian.PutUint16(p.Hi)})
 		}
+	}
+	if r.ClampMSS != 0 {
+		if r.ClampMSS < 0 || r.ClampMSS > 0xffff || r.Proto != policy.ProtoTCP {
+			return nil, fmt.Errorf("MSS clamp %d: want 1 to 65535, on TCP", r.ClampMSS)
+		}
+		if r.Jump != "" || r.Final != "" {
+			return nil, fmt.Errorf("an MSS clamp ends in no verdict")
+		}
+		return append(e, mssClamp(uint16(r.ClampMSS))...), nil
 	}
 	switch {
 	case r.Jump != "":

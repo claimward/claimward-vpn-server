@@ -56,14 +56,19 @@ const (
 // Rule is one rule. Zero fields are not matched. A rule with a Jump or
 // Verdict ends in it.
 type Rule struct {
-	Iface  string        // arrived on this interface
-	IPv4   bool          // the packet is IPv4 (implied by SrcSet and Dst)
-	SrcSet string        // source address is in this set
-	Dst    netip.Prefix  // destination address is in this prefix
-	Proto  string        // policy.ProtoTCP, ProtoUDP, or "" for any
-	Ports  []policy.Port // destination port is in one of these ranges
-	Jump   string        // continue in this chain
-	Final  string        // Accept or Drop
+	Iface  string // arrived on this interface
+	OIface string // leaves on this interface (forward hook)
+	IPv4   bool   // the packet is IPv4 (implied by SrcSet and Dst)
+	IPv6   bool   // the packet is IPv6
+	// ClampMSS, when positive, matches a TCP SYN and lowers its MSS option to
+	// this value if it is larger. Such a rule ends in no verdict.
+	ClampMSS int
+	SrcSet   string        // source address is in this set
+	Dst      netip.Prefix  // destination address is in this prefix
+	Proto    string        // policy.ProtoTCP, ProtoUDP, or "" for any
+	Ports    []policy.Port // destination port is in one of these ranges
+	Jump     string        // continue in this chain
+	Final    string        // Accept or Drop
 }
 
 // Chain is a chain; Hook is "" for a regular (jump target) chain.
@@ -71,6 +76,9 @@ type Chain struct {
 	Name  string
 	Hook  string
 	Rules []Rule
+	// Mangle hooks the chain at the mangle priority (before the filter
+	// chains) instead of the filter priority.
+	Mangle bool
 }
 
 // Ruleset is the whole table.
@@ -108,6 +116,62 @@ func Build(iface string, tenants []Tenant) Ruleset {
 		rules = append(rules, Rule{Iface: iface, Final: Drop})
 		rs.Chains = append(rs.Chains, Chain{Name: hook, Hook: hook, Rules: rules})
 	}
+	return rs
+}
+
+// MSS clamping. A TCP connection through the tunnel must not announce a
+// segment size the tunnel cannot carry: GSO-coalesced segments larger than the
+// path are lost and TCP recovers only through a 200 ms retransmission timeout.
+// Clamping the MSS of every SYN to the tunnel MTU (less the IP and TCP headers)
+// keeps both ends below it.
+const (
+	mssChainForward = "mss_forward"
+	mssChainInput   = "mss_input"
+
+	// IPv4 and IPv6 header plus a 20 byte TCP header.
+	mssOverheadV4 = 40
+	mssOverheadV6 = 60
+)
+
+// MSSFor is the MSS to clamp to for a tunnel MTU: the MTU less the IP header
+// and the 20 bytes of TCP header; v6 selects IPv6's 40 byte header.
+func MSSFor(mtu int, v6 bool) int {
+	if v6 {
+		return mtu - mssOverheadV6
+	}
+	return mtu - mssOverheadV4
+}
+
+// WithMSSClamp adds, to rs, the chains that lower the MSS of every TCP SYN
+// (and SYN/ACK) crossing iface to what mtu carries, in both directions:
+//
+//	chain mss_forward   forward hook: SYNs arriving on iface (peer to the
+//	                    networks behind the gateway) and SYNs leaving on it
+//	                    (their answers)
+//	chain mss_input     input hook: SYNs arriving on iface for the gateway
+//	                    host itself (the file server may be the gateway)
+//
+// The option is only ever lowered, never raised, and the chains hold no
+// verdict: they run at the mangle priority, before the policy's, and leave
+// every packet to it. An MTU outside what the tunnel can have (below IPv6's
+// 1280) adds nothing, because such a value is never advertised either.
+func WithMSSClamp(rs Ruleset, iface string, mtu int) Ruleset {
+	if mtu < 1280 {
+		return rs
+	}
+	var in, fwd []Rule
+	for _, v6 := range []bool{false, true} {
+		base := Rule{IPv4: !v6, IPv6: v6, Proto: policy.ProtoTCP, ClampMSS: MSSFor(mtu, v6)}
+		arrive := base
+		arrive.Iface = iface
+		leave := base
+		leave.OIface = iface
+		in = append(in, arrive)
+		fwd = append(fwd, arrive, leave)
+	}
+	rs.Chains = append(rs.Chains,
+		Chain{Name: mssChainForward, Hook: HookForward, Mangle: true, Rules: fwd},
+		Chain{Name: mssChainInput, Hook: HookInput, Mangle: true, Rules: in})
 	return rs
 }
 

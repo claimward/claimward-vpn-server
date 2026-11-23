@@ -146,7 +146,7 @@ func run(log *slog.Logger) error {
 	// ⛔ Fail closed: what each peer may reach is ENFORCED here, by the
 	// kernel's nftables, before any peer can be enrolled. If the ruleset
 	// cannot be installed the server does not start.
-	fwm, err := startFirewall(cfg.WGInterface, newApplier(cfg.DryRun, log), ts, st, log)
+	fwm, err := startFirewall(cfg.WGInterface, cfg.TunnelMTU, newApplier(cfg.DryRun, log), ts, st, log)
 	if err != nil {
 		return err
 	}

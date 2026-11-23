@@ -151,11 +151,11 @@ func TestNewApplier(t *testing.T) {
 // ⛔ No ruleset, no server.
 func TestStartFirewallFailsClosed(t *testing.T) {
 	ts, st := tenant.New(nil, nil), store.New()
-	if _, err := startFirewall("wg0", &applier{err: errors.New("EPERM")}, ts, st, quiet); err == nil {
+	if _, err := startFirewall("wg0", 1400, &applier{err: errors.New("EPERM")}, ts, st, quiet); err == nil {
 		t.Fatal("the server would start without a firewall")
 	}
 	ap := &applier{}
-	if _, err := startFirewall("wg0", ap, ts, st, quiet); err != nil {
+	if _, err := startFirewall("wg0", 1400, ap, ts, st, quiet); err != nil {
 		t.Fatal(err)
 	}
 	if ap.calls != 1 {

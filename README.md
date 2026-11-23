@@ -303,7 +303,7 @@ does not depend on it.
 | `DNS` | | — | CSV DNS servers of the `default` tenant |
 | `KEEPALIVE` | | `25` | persistent keepalive (seconds) |
 | `LEASE_TTL` | | `24h` | lease duration without heartbeat |
-| `TUNNEL_MTU` | | derived | MTU of the gateway's WireGuard interface, set by the server at start and advertised to clients as `mtu` in the enroll response. Unset: the uplink's MTU minus 80, capped at 1420 and floored at 1280 (1420 when the uplink cannot be read). Set: a whole number from 1280 to 9000, anything else stops the start. Clients lower it further to fit their own path. Needs `CAP_NET_ADMIN` (the gateway already holds it); not applied under `WG_DRYRUN` |
+| `TUNNEL_MTU` | | derived | MTU of the gateway's WireGuard interface, set by the server at start and advertised to clients as `mtu` in the enroll response. Unset: the uplink's MTU minus 80, capped at 1420 and floored at 1280 (1420 when the uplink cannot be read). Set: a whole number from 1280 to 9000, anything else stops the start. Clients lower it further to fit their own path. The same table `inet claimward` also clamps the MSS of every TCP SYN crossing the interface (forward both ways, and input for the gateway host itself) to this MTU minus 40 (IPv4) or 60 (IPv6), so a connection never announces a segment the tunnel cannot carry. Needs `CAP_NET_ADMIN` (the gateway already holds it); not applied under `WG_DRYRUN` |
 | `MAX_DEVICES_PER_SUBJECT` | | `5` | most devices one account may have enrolled at once (a further new key gets 429 `too_many_devices`) |
 | `LISTEN_ADDR` | | `:8443` | HTTP control-plane listen address |
 | `GRPC_ADDR` | | `:8444` | RouteService gRPC listen address |

@@ -44,8 +44,9 @@ func loadTenants(ts *tenant.Store, path string, log *slog.Logger) error {
 // startFirewall installs the gateway's ruleset and keeps it following the
 // tenants (and, through the returned Manager, the peers). An error means the
 // server must not start: it would forward without enforcing anything.
-func startFirewall(iface string, ap fw.Applier, ts *tenant.Store, st *store.Store, log *slog.Logger) (*fw.Manager, error) {
+func startFirewall(iface string, mtu int, ap fw.Applier, ts *tenant.Store, st *store.Store, log *slog.Logger) (*fw.Manager, error) {
 	m := fw.NewManager(iface, ap, fw.FromStores(ts, st), log)
+	m.ClampMSS(mtu)
 	if err := m.Sync(); err != nil {
 		return nil, fmt.Errorf("install the gateway firewall (needs Linux and CAP_NET_ADMIN; WG_DRYRUN=true for development): %w", err)
 	}
