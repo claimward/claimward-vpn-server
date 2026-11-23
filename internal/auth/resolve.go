@@ -44,9 +44,9 @@ func NewGitHubResolver(apiURL string) func(ctx context.Context, login string) (i
 			Login string `json:"login"`
 			Type  string `json:"type"`
 		}
-		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResolveBody)).Decode(&u); err != nil {
-			return 0, fmt.Errorf("GitHub user %q: %w", login, err)
-		}
+		// A body that does not decode leaves u zero (json.Decoder fills nothing
+		// from an incomplete value), and the checks below refuse a zero u.
+		_ = json.NewDecoder(io.LimitReader(resp.Body, maxResolveBody)).Decode(&u)
 		if u.Type != "User" {
 			return 0, fmt.Errorf("GitHub account %q is not a user (%q)", login, u.Type)
 		}
