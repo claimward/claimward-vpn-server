@@ -5,6 +5,7 @@ package grpcsrv
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/claimward/claimward-vpn-client/pkg/routespb"
 	"github.com/claimward/claimward-vpn-server/internal/auth"
@@ -25,6 +26,7 @@ type Server struct {
 	routespb.UnimplementedRouteServiceServer
 	tenants *tenant.Store
 	peers   *store.Store
+	recheck time.Duration // idle re-authorisation period; DefaultRecheck when zero
 }
 
 // New returns a RouteService server.
@@ -52,6 +54,24 @@ func (s *Server) Watch(req *routespb.WatchRequest, stream routespb.RouteService_
 	id, ch, cur := s.tenants.Subscribe(tenantID)
 	defer s.tenants.Unsubscribe(tenantID, id)
 
+	// ⛔ The stream was authorised once, at its start, and used to be pushed
+	// to for as long as it stayed open: after the peer was reaped or
+	// deregistered, the person removed from the tenant, or the token expired,
+	// it kept receiving the tenant's routes. It is now re-authorised before
+	// every Send and on a timer, and ends with the token.
+	var expired <-chan time.Time
+	if !claims.Expires.IsZero() {
+		d := time.Until(claims.Expires)
+		if d <= 0 {
+			return status.Error(codes.Unauthenticated, "token expired")
+		}
+		t := time.NewTimer(d)
+		defer t.Stop()
+		expired = t.C
+	}
+	tick := time.NewTicker(s.recheckEvery())
+	defer tick.Stop()
+
 	if err := stream.Send(toProto(cur)); err != nil {
 		return err
 	}
@@ -59,15 +79,47 @@ func (s *Server) Watch(req *routespb.WatchRequest, stream routespb.RouteService_
 		select {
 		case <-stream.Context().Done():
 			return nil
+		case <-expired:
+			return status.Error(codes.Unauthenticated, "token expired")
+		case <-tick.C:
+			if err := s.stillAuthorised(req.GetPublicKey(), tenantID, claims); err != nil {
+				return err
+			}
 		case set, ok := <-ch:
 			if !ok {
 				return nil
+			}
+			if err := s.stillAuthorised(req.GetPublicKey(), tenantID, claims); err != nil {
+				return err
 			}
 			if err := stream.Send(toProto(set)); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+// DefaultRecheck is how often an idle stream is re-authorised.
+const DefaultRecheck = 15 * time.Second
+
+func (s *Server) recheckEvery() time.Duration {
+	if s.recheck > 0 {
+		return s.recheck
+	}
+	return DefaultRecheck
+}
+
+// stillAuthorised is whether the device is still enrolled by the caller and
+// the caller is still a member of the tenant it enrolled into.
+func (s *Server) stillAuthorised(key, tenantID string, claims *auth.Claims) error {
+	p := s.peers.Get(key)
+	if p == nil || p.Subject != claims.Subject || p.Tenant != tenantID {
+		return status.Error(codes.NotFound, "enrollment ended")
+	}
+	if _, ok := s.tenants.Get(tenantID); !ok || !s.tenants.IsMember(tenantID, claims.Tenancy()) {
+		return status.Error(codes.PermissionDenied, "you are no longer a member of the tenant")
+	}
+	return nil
 }
 
 func toProto(s tenant.RouteSet) *routespb.RouteUpdate {

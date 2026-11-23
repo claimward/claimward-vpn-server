@@ -16,6 +16,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
 )
@@ -36,6 +37,9 @@ type Claims struct {
 	// IdP is the institution that vouched for the person, when the provider
 	// says (go-authn's "idp": a SAML entity ID).
 	IdP string
+	// Expires is when the credential stops being valid (the token's "exp");
+	// zero when the provider has no such notion (GitHub access tokens).
+	Expires time.Time
 }
 
 // Verifier validates a bearer credential and returns its claims.

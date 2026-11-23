@@ -104,7 +104,10 @@ Beyond the enrollment API, the server exposes:
 
 - **RouteService (gRPC)** — a `Watch` stream (on `GRPC_ADDR`, default `:8444`;
   advertised to clients as `GRPC_ENDPOINT`) that pushes a client's tenant routes
-  and live updates.
+  and live updates. The stream is re-authorised before every push and every 15 s:
+  it ends when the device is deregistered or reaped, when the person leaves the
+  tenant, when the tenant is deleted, and at the token's expiry (the client
+  reconnects with a fresh token).
 - **Admin API + WebUI** — a token-guarded (`ADMIN_TOKEN`) surface under `/admin/`:
   a `GET /admin/api/overview`, tenant CRUD at `/admin/api/tenants[...]`, and an
   embedded Svelte single-page app. Disabled unless `ADMIN_TOKEN` is set.
@@ -205,7 +208,7 @@ not be skipped there.
 | `GITHUB_API_URL` | | `https://api.github.com` | set for GitHub Enterprise |
 | `OIDC_ISSUER` | when `oidc` or `go-authn` | — | issuer URL (discovery) |
 | `OIDC_CLIENT_ID` | when `oidc` or `go-authn` | — | expected token audience |
-| `OIDC_ALLOWED_DOMAINS` | | — | CSV email-domain allowlist (oidc authz) |
+| `OIDC_ALLOWED_DOMAINS` | | — | CSV email-domain allowlist (oidc authz); only an address the IdP marks `email_verified` counts |
 | `GOAUTHN_GATEWAY_CLIENT_ID` | when `go-authn` | — | this gateway's own client at the go-authn provider (`wireguard_peers`) |
 | `GOAUTHN_GATEWAY_SECRET_FILE` | when `go-authn` | — | its secret, **from a file only** |
 | `GOAUTHN_PEER_LIST_INTERVAL` | | `30s` | how often the list of registered keys is fetched |
