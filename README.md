@@ -198,7 +198,7 @@ not be skipped there.
 | Var | Required | Default | Notes |
 |-----|----------|---------|-------|
 | `AUTH_PROVIDER` | | `github` | identity provider: `github`, `oidc` or `go-authn` |
-| `GITHUB_ALLOWED_ORGS` | | — | CSV org-membership allowlist (github authz; recommended) |
+| `GITHUB_ALLOWED_ORGS` | github | — | CSV org-membership allowlist. **REQUIRED with `AUTH_PROVIDER=github`**, with no opt-out: the server refuses to start without it, and the verifier refuses every token if it is empty (an empty list would admit any GitHub account) |
 | `GITHUB_API_URL` | | `https://api.github.com` | set for GitHub Enterprise |
 | `OIDC_ISSUER` | when `oidc` or `go-authn` | — | issuer URL (discovery) |
 | `OIDC_CLIENT_ID` | when `oidc` or `go-authn` | — | expected token audience |
@@ -218,6 +218,7 @@ not be skipped there.
 | `DNS` | | — | CSV DNS servers of the `default` tenant |
 | `KEEPALIVE` | | `25` | persistent keepalive (seconds) |
 | `LEASE_TTL` | | `24h` | lease duration without heartbeat |
+| `MAX_DEVICES_PER_SUBJECT` | | `5` | most devices one account may have enrolled at once (a further new key gets 429 `too_many_devices`) |
 | `LISTEN_ADDR` | | `:8443` | HTTP control-plane listen address |
 | `GRPC_ADDR` | | `:8444` | RouteService gRPC listen address |
 | `GRPC_ENDPOINT` | | — | `host:port` advertised to clients for route streaming |

@@ -39,13 +39,12 @@ type Config struct {
 	SSFInterval time.Duration
 
 	GitHubAPIURL      string   // default https://api.github.com (set for GHE)
-	GitHubAllowedOrgs []string // optional org-membership allowlist (github)
-
-	WGInterface     string // kernel interface managed via wgctrl, e.g. "wg0"
-	WGEndpoint      string // public host:port advertised to clients (required)
-	WGPrivateKey    string // base64 server private key (or use WGPrivateKeyFile)
-	WGServerPrivKey string // resolved private key (internal, filled by Load)
-	DryRun          bool   // if true, don't touch a real device — log peer ops
+	GitHubAllowedOrgs []string // org-membership allowlist (github); required with the github provider
+	WGInterface       string   // kernel interface managed via wgctrl, e.g. "wg0"
+	WGEndpoint        string   // public host:port advertised to clients (required)
+	WGPrivateKey      string   // base64 server private key (or use WGPrivateKeyFile)
+	WGServerPrivKey   string   // resolved private key (internal, filled by Load)
+	DryRun            bool     // if true, don't touch a real device — log peer ops
 
 	VPNCIDR    string   // pool, e.g. "10.80.0.0/24"; server takes the first host
 	PushRoutes []string // AllowedIPs pushed to clients; defaults to [VPNCIDR]
@@ -55,37 +54,41 @@ type Config struct {
 	DNS         []string      // optional DNS servers pushed to clients
 	Keepalive   int           // persistent keepalive seconds advertised to clients
 	LeaseTTL    time.Duration // how long an enrollment lasts without a heartbeat
+
+	// MaxDevicesPerSubject caps the devices one identity may have enrolled.
+	MaxDevicesPerSubject int
 }
 
 // Load reads configuration from the environment and validates required fields.
 func Load() (*Config, error) {
 	c := &Config{
-		ListenAddr:        env("LISTEN_ADDR", ":8443"),
-		TLSCert:           os.Getenv("TLS_CERT"),
-		TLSKey:            os.Getenv("TLS_KEY"),
-		GRPCAddr:          env("GRPC_ADDR", ":8444"),
-		GRPCEndpoint:      os.Getenv("GRPC_ENDPOINT"),
-		AdminToken:        os.Getenv("ADMIN_TOKEN"),
-		AuthProvider:      env("AUTH_PROVIDER", "github"),
-		OIDCIssuer:        os.Getenv("OIDC_ISSUER"),
-		OIDCClientID:      os.Getenv("OIDC_CLIENT_ID"),
-		AllowedDomains:    splitCSV(os.Getenv("OIDC_ALLOWED_DOMAINS")),
-		GitHubAPIURL:      os.Getenv("GITHUB_API_URL"),
-		GitHubAllowedOrgs: splitCSV(os.Getenv("GITHUB_ALLOWED_ORGS")),
-		WGInterface:       env("WG_INTERFACE", "wg0"),
-		WGEndpoint:        os.Getenv("WG_ENDPOINT"),
-		WGPrivateKey:      os.Getenv("WG_PRIVATE_KEY"),
-		DryRun:            boolEnv("WG_DRYRUN", false),
-		VPNCIDR:           env("VPN_CIDR", "10.80.0.0/24"),
-		PushRoutes:        splitCSV(os.Getenv("PUSH_ROUTES")),
-		TenantsFile:       os.Getenv("TENANTS_FILE"),
-		DNS:               splitCSV(os.Getenv("DNS")),
-		Keepalive:         intEnv("KEEPALIVE", 25),
-		LeaseTTL:          durEnv("LEASE_TTL", 24*time.Hour),
-		GatewayClientID:   os.Getenv("GOAUTHN_GATEWAY_CLIENT_ID"),
-		PeerListInterval:  durEnv("GOAUTHN_PEER_LIST_INTERVAL", 30*time.Second),
-		SSF:               boolEnv("GOAUTHN_SSF", false),
-		SSFInterval:       durEnv("GOAUTHN_SSF_INTERVAL", 5*time.Second),
+		ListenAddr:           env("LISTEN_ADDR", ":8443"),
+		TLSCert:              os.Getenv("TLS_CERT"),
+		TLSKey:               os.Getenv("TLS_KEY"),
+		GRPCAddr:             env("GRPC_ADDR", ":8444"),
+		GRPCEndpoint:         os.Getenv("GRPC_ENDPOINT"),
+		AdminToken:           os.Getenv("ADMIN_TOKEN"),
+		AuthProvider:         env("AUTH_PROVIDER", "github"),
+		OIDCIssuer:           os.Getenv("OIDC_ISSUER"),
+		OIDCClientID:         os.Getenv("OIDC_CLIENT_ID"),
+		AllowedDomains:       splitCSV(os.Getenv("OIDC_ALLOWED_DOMAINS")),
+		GitHubAPIURL:         os.Getenv("GITHUB_API_URL"),
+		GitHubAllowedOrgs:    splitCSV(os.Getenv("GITHUB_ALLOWED_ORGS")),
+		WGInterface:          env("WG_INTERFACE", "wg0"),
+		WGEndpoint:           os.Getenv("WG_ENDPOINT"),
+		WGPrivateKey:         os.Getenv("WG_PRIVATE_KEY"),
+		DryRun:               boolEnv("WG_DRYRUN", false),
+		VPNCIDR:              env("VPN_CIDR", "10.80.0.0/24"),
+		PushRoutes:           splitCSV(os.Getenv("PUSH_ROUTES")),
+		TenantsFile:          os.Getenv("TENANTS_FILE"),
+		DNS:                  splitCSV(os.Getenv("DNS")),
+		Keepalive:            intEnv("KEEPALIVE", 25),
+		LeaseTTL:             durEnv("LEASE_TTL", 24*time.Hour),
+		MaxDevicesPerSubject: intEnv("MAX_DEVICES_PER_SUBJECT", 5),
+		GatewayClientID:      os.Getenv("GOAUTHN_GATEWAY_CLIENT_ID"),
+		PeerListInterval:     durEnv("GOAUTHN_PEER_LIST_INTERVAL", 30*time.Second),
+		SSF:                  boolEnv("GOAUTHN_SSF", false),
+		SSFInterval:          durEnv("GOAUTHN_SSF_INTERVAL", 5*time.Second),
 	}
 
 	if file := os.Getenv("WG_PRIVATE_KEY_FILE"); file != "" && c.WGPrivateKey == "" {
@@ -105,7 +108,11 @@ func Load() (*Config, error) {
 	}
 	switch c.AuthProvider {
 	case "github":
-		// No extra required vars; GITHUB_ALLOWED_ORGS is recommended for authz.
+		// ⛔ Fail closed, with no escape hatch: with no org allowlist EVERY
+		// GitHub account is let in -- an open relay.
+		if len(c.GitHubAllowedOrgs) == 0 {
+			return nil, fmt.Errorf("AUTH_PROVIDER=github requires GITHUB_ALLOWED_ORGS: without it any GitHub account could enroll")
+		}
 	case "oidc":
 		required["OIDC_ISSUER"] = c.OIDCIssuer
 		required["OIDC_CLIENT_ID"] = c.OIDCClientID
@@ -130,6 +137,10 @@ func Load() (*Config, error) {
 		}
 	default:
 		return nil, fmt.Errorf("invalid AUTH_PROVIDER %q (want \"github\", \"oidc\" or \"go-authn\")", c.AuthProvider)
+	}
+
+	if c.MaxDevicesPerSubject <= 0 {
+		return nil, fmt.Errorf("MAX_DEVICES_PER_SUBJECT must be positive")
 	}
 
 	var missing []string
