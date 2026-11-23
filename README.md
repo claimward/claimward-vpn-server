@@ -198,7 +198,7 @@ not be skipped there.
 | Var | Required | Default | Notes |
 |-----|----------|---------|-------|
 | `AUTH_PROVIDER` | | `github` | identity provider: `github`, `oidc` or `go-authn` |
-| `GITHUB_ALLOWED_ORGS` | | — | CSV org-membership allowlist (github authz; recommended) |
+| `GITHUB_ALLOWED_ORGS` | github | — | CSV org-membership allowlist. **REQUIRED with `AUTH_PROVIDER=github`**, with no opt-out: the server refuses to start without it, and the verifier refuses every token if it is empty (an empty list would admit any GitHub account) |
 | `GITHUB_API_URL` | | `https://api.github.com` | set for GitHub Enterprise |
 | `OIDC_ISSUER` | when `oidc` or `go-authn` | — | issuer URL (discovery) |
 | `OIDC_CLIENT_ID` | when `oidc` or `go-authn` | — | expected token audience |

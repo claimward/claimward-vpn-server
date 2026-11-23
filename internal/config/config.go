@@ -39,13 +39,12 @@ type Config struct {
 	SSFInterval time.Duration
 
 	GitHubAPIURL      string   // default https://api.github.com (set for GHE)
-	GitHubAllowedOrgs []string // optional org-membership allowlist (github)
-
-	WGInterface     string // kernel interface managed via wgctrl, e.g. "wg0"
-	WGEndpoint      string // public host:port advertised to clients (required)
-	WGPrivateKey    string // base64 server private key (or use WGPrivateKeyFile)
-	WGServerPrivKey string // resolved private key (internal, filled by Load)
-	DryRun          bool   // if true, don't touch a real device — log peer ops
+	GitHubAllowedOrgs []string // org-membership allowlist (github); required with the github provider
+	WGInterface       string   // kernel interface managed via wgctrl, e.g. "wg0"
+	WGEndpoint        string   // public host:port advertised to clients (required)
+	WGPrivateKey      string   // base64 server private key (or use WGPrivateKeyFile)
+	WGServerPrivKey   string   // resolved private key (internal, filled by Load)
+	DryRun            bool     // if true, don't touch a real device — log peer ops
 
 	VPNCIDR    string   // pool, e.g. "10.80.0.0/24"; server takes the first host
 	PushRoutes []string // AllowedIPs pushed to clients; defaults to [VPNCIDR]
@@ -109,7 +108,11 @@ func Load() (*Config, error) {
 	}
 	switch c.AuthProvider {
 	case "github":
-		// No extra required vars; GITHUB_ALLOWED_ORGS is recommended for authz.
+		// ⛔ Fail closed, with no escape hatch: with no org allowlist EVERY
+		// GitHub account is let in -- an open relay.
+		if len(c.GitHubAllowedOrgs) == 0 {
+			return nil, fmt.Errorf("AUTH_PROVIDER=github requires GITHUB_ALLOWED_ORGS: without it any GitHub account could enroll")
+		}
 	case "oidc":
 		required["OIDC_ISSUER"] = c.OIDCIssuer
 		required["OIDC_CLIENT_ID"] = c.OIDCClientID
