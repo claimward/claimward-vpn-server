@@ -72,11 +72,7 @@ func (v *GitHubVerifier) Verify(ctx context.Context, token string) (*Claims, err
 		claims.Groups = append(claims.Groups, o.Login)
 	}
 
-	ok, err := v.inAllowedOrg(ctx, token, user.Login)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
+	if !v.inAllowedOrg(ctx, token) {
 		return nil, fmt.Errorf("user %q is not a member of an allowed org", user.Login)
 	}
 	return claims, nil
@@ -95,7 +91,7 @@ func (v *GitHubVerifier) hasAllowedOrg() bool {
 
 // inAllowedOrg reports whether the user is an active member of any allowed org,
 // using the user's own token (requires the read:org scope).
-func (v *GitHubVerifier) inAllowedOrg(ctx context.Context, token, login string) (bool, error) {
+func (v *GitHubVerifier) inAllowedOrg(ctx context.Context, token string) bool {
 	for _, org := range v.allowedOrgs {
 		org = strings.TrimSpace(org)
 		if org == "" {
@@ -106,10 +102,10 @@ func (v *GitHubVerifier) inAllowedOrg(ctx context.Context, token, login string) 
 		}
 		err := v.get(ctx, token, "/user/memberships/orgs/"+org, &m)
 		if err == nil && m.State == "active" {
-			return true, nil
+			return true
 		}
 	}
-	return false, nil
+	return false
 }
 
 func (v *GitHubVerifier) get(ctx context.Context, token, path string, out any) error {
