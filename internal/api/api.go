@@ -324,6 +324,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 		DNS:                 rs.DNS,
 		GRPCEndpoint:        s.cfg.GRPCEndpoint,
 		PersistentKeepalive: s.cfg.Keepalive,
+		MTU:                 s.cfg.TunnelMTU,
 		LeaseExpiresAt:      expiry,
 	})
 }

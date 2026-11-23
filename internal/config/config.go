@@ -64,9 +64,13 @@ type Config struct {
 	// TenantsFile is a JSON file of tenants with their access policies
 	// (see internal/tenant ParseFile). Tenant "default" overrides PUSH_ROUTES.
 	TenantsFile string
-	DNS         []string      // optional DNS servers pushed to clients
-	Keepalive   int           // persistent keepalive seconds advertised to clients
-	LeaseTTL    time.Duration // how long an enrollment lasts without a heartbeat
+	DNS         []string // optional DNS servers pushed to clients
+	Keepalive   int      // persistent keepalive seconds advertised to clients
+	// TunnelMTU is the MTU of the gateway's WireGuard interface, advertised
+	// to clients as `mtu`. TUNNEL_MTU, 0 = derive it from the uplink's MTU
+	// (see AutoTunnelMTU); main fills in the derived value.
+	TunnelMTU int
+	LeaseTTL  time.Duration // how long an enrollment lasts without a heartbeat
 
 	// MaxDevicesPerSubject caps the devices one identity may have enrolled.
 	MaxDevicesPerSubject int
@@ -151,6 +155,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid AUTH_PROVIDER %q (want \"github\", \"oidc\" or \"go-authn\")", c.AuthProvider)
 	}
 
+	mtu, err := ParseTunnelMTU(os.Getenv("TUNNEL_MTU"))
+	if err != nil {
+		return nil, err
+	}
+	c.TunnelMTU = mtu
+
 	if c.MaxDevicesPerSubject <= 0 {
 		return nil, fmt.Errorf("MAX_DEVICES_PER_SUBJECT must be positive")
 	}
@@ -201,6 +211,43 @@ func refuseRemovedEnv() error {
 	}
 	return fmt.Errorf("claimward-server v0.6.0 takes every secret from the credentials directory $%s, never from the environment (see deploy/README.md): %s",
 		creds.EnvDir, strings.Join(msgs, "; "))
+}
+
+// Tunnel MTU bounds. 1280 is IPv6's minimum link MTU; 1420 is WireGuard's
+// default, the most a 1500-byte IPv4 path carries; 9000 is a jumbo frame.
+const (
+	MinTunnelMTU     = 1280
+	DefaultTunnelMTU = 1420
+	MaxTunnelMTU     = 9000
+)
+
+// ParseTunnelMTU reads TUNNEL_MTU: empty is 0 (derive it), anything else must
+// be a whole number within [MinTunnelMTU, MaxTunnelMTU]. A value that does
+// not parse or is out of range is refused at start, never replaced by a
+// default: an MTU that does not fit the path stalls TCP silently.
+func ParseTunnelMTU(s string) (int, error) {
+	if s == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid TUNNEL_MTU %q: want a whole number of bytes", s)
+	}
+	if n < MinTunnelMTU || n > MaxTunnelMTU {
+		return 0, fmt.Errorf("invalid TUNNEL_MTU %d: want %d to %d", n, MinTunnelMTU, MaxTunnelMTU)
+	}
+	return n, nil
+}
+
+// AutoTunnelMTU is the tunnel MTU to use when TUNNEL_MTU is unset: the
+// uplink's MTU minus 80 (WireGuard over an IPv6 underlay, which also covers
+// IPv4's 60), capped at DefaultTunnelMTU and floored at MinTunnelMTU. An
+// unknown uplink (0) gives DefaultTunnelMTU.
+func AutoTunnelMTU(uplinkMTU int) int {
+	if uplinkMTU <= 0 {
+		return DefaultTunnelMTU
+	}
+	return min(DefaultTunnelMTU, max(uplinkMTU-80, MinTunnelMTU))
 }
 
 func env(key, def string) string {
