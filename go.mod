@@ -1,6 +1,6 @@
 module github.com/claimward/claimward-vpn-server
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/claimward/claimward-vpn-client v0.3.1

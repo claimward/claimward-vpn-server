@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"public_key\":\"HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=\"}")

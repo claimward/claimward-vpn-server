@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"public_key\":[1,{\"a\":null}],\"tenant\":123,\"extra\":\"\\u0000\"}")
