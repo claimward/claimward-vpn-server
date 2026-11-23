@@ -125,6 +125,10 @@ func run(log *slog.Logger) error {
 		log.Warn("removed peers a previous run left; their devices enroll again", "interface", cfg.WGInterface, "peers", n)
 	}
 
+	if err := applyTunnelMTU(cfg, wg.UplinkMTU, wg.SetInterfaceMTU, log); err != nil {
+		return err
+	}
+
 	st := store.New()
 	// Named members are pinned to their GitHub numeric IDs as the tenants are
 	// loaded; an unresolvable login stops the start.
