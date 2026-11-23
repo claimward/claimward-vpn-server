@@ -9,6 +9,7 @@
   let domains = $state((tenant?.domains ?? []).join(', '))
   let groups = $state((tenant?.groups ?? []).join(', '))
   let idps = $state((tenant?.idps ?? []).join(', '))
+  let members = $state((tenant?.members ?? []).join(', '))
   let allowedIps = $state((tenant?.allowed_ips ?? []).join(', '))
   let dns = $state((tenant?.dns ?? []).join(', '))
   let saving = $state(false)
@@ -28,6 +29,7 @@
         domains: list(domains),
         groups: list(groups),
         idps: list(idps),
+        members: list(members),
         allowed_ips: list(allowedIps),
         dns: list(dns),
       })
@@ -92,6 +94,15 @@
         class="input input-bordered input-sm font-mono"
         bind:value={idps}
         placeholder="https://idp.univ-a.fr/idp/shibboleth"
+      />
+    </label>
+
+    <label class="form-control">
+      <span class="label-text mb-1 text-xs opacity-70">Named members: GitHub logins, pinned to their account ID when saved (comma-separated)</span>
+      <input
+        class="input input-bordered input-sm font-mono"
+        bind:value={members}
+        placeholder="octocat, hubot"
       />
     </label>
 

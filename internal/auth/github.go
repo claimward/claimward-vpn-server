@@ -19,6 +19,19 @@ type GitHubVerifier struct {
 	apiURL      string
 	allowedOrgs []string
 	http        *http.Client
+	members     MemberSet
+}
+
+// MemberSet is the tenants' named members, as the entry gate sees them.
+type MemberSet interface {
+	NamedMember(subject string) bool
+	HasNamedMembers() bool
+}
+
+// WithMembers admits the people the tenants name, beside the allowed orgs.
+func (v *GitHubVerifier) WithMembers(m MemberSet) *GitHubVerifier {
+	v.members = m
+	return v
 }
 
 // NewGitHubVerifier returns a verifier for the given API base URL (empty =
@@ -38,8 +51,8 @@ func (v *GitHubVerifier) Verify(ctx context.Context, token string) (*Claims, err
 	// ⛔ Fail closed: with no allowlist every GitHub account would be admitted,
 	// an open relay. Config.Load refuses this too; here it holds for any
 	// caller that builds a verifier by hand.
-	if !v.hasAllowedOrg() {
-		return nil, fmt.Errorf("github authentication needs an organisation allowlist (GITHUB_ALLOWED_ORGS)")
+	if !v.hasAllowedOrg() && (v.members == nil || !v.members.HasNamedMembers()) {
+		return nil, fmt.Errorf("github authentication needs an organisation allowlist (GITHUB_ALLOWED_ORGS) or tenants with named members")
 	}
 	var user struct {
 		ID    int64  `json:"id"`
@@ -72,8 +85,11 @@ func (v *GitHubVerifier) Verify(ctx context.Context, token string) (*Claims, err
 		claims.Groups = append(claims.Groups, o.Login)
 	}
 
-	if !v.inAllowedOrg(ctx, token) {
-		return nil, fmt.Errorf("user %q is not a member of an allowed org", user.Login)
+	// Admitted: a named member of a tenant (matched on the pinned numeric ID,
+	// never the login), or a member of an allowed organisation.
+	named := v.members != nil && v.members.NamedMember(claims.Subject)
+	if !named && !(v.hasAllowedOrg() && v.inAllowedOrg(ctx, token)) {
+		return nil, fmt.Errorf("user %q is neither a named tenant member nor in an allowed org", user.Login)
 	}
 	return claims, nil
 }

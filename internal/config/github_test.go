@@ -11,26 +11,16 @@ func githubEnv(t *testing.T, orgs string) {
 	t.Setenv("GITHUB_ALLOWED_ORGS", orgs)
 }
 
-// With the default provider (GitHub) and no org allowlist every GitHub
-// account could enroll: Load refuses, with no opt-out.
-func TestDefaultGitHubConfigRequiresAnAllowlist(t *testing.T) {
+// The allowlist is optional when tenants name members, so Load accepts none;
+// the entry gate (cmd/claimward-server) refuses the case of no members either.
+func TestGitHubAllowlistIsOptionalAtLoad(t *testing.T) {
 	githubEnv(t, "")
-	if c, err := Load(); err == nil {
-		t.Errorf("Load accepted provider %q with allowed orgs %v: any GitHub account may enroll", c.AuthProvider, c.GitHubAllowedOrgs)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
 	}
-	// A list of blanks names no organisation either.
-	githubEnv(t, " , ")
-	if _, err := Load(); err == nil {
-		t.Error("an allowlist of blanks was accepted")
-	}
-}
-
-// The former opt-out is gone: setting it changes nothing.
-func TestNoEscapeHatchForTheGitHubAllowlist(t *testing.T) {
-	githubEnv(t, "")
-	t.Setenv("GITHUB_ALLOW_ANY_ACCOUNT", "true")
-	if _, err := Load(); err == nil {
-		t.Error("GITHUB_ALLOW_ANY_ACCOUNT admitted a configuration with no allowlist")
+	if len(c.GitHubAllowedOrgs) != 0 {
+		t.Errorf("orgs = %v", c.GitHubAllowedOrgs)
 	}
 }
 

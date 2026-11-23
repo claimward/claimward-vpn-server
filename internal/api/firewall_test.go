@@ -43,7 +43,7 @@ func firewallServer(t *testing.T) (*Server, *store.Store, *tenant.Store, *record
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ts.Seed(tenant.Tenant{ID: tenant.DefaultID, Policy: rules}); err != nil {
+	if err := ts.Seed(tenant.Tenant{ID: tenant.DefaultID, Domains: []string{"example.org"}, Policy: rules}); err != nil {
 		t.Fatal(err)
 	}
 	rec := &recorder{}

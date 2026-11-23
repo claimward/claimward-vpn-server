@@ -51,7 +51,10 @@ func (s *Server) Watch(req *routespb.WatchRequest, stream routespb.RouteService_
 		return status.Error(codes.PermissionDenied, "you are not a member of the tenant this device enrolled into")
 	}
 
-	id, ch, cur := s.tenants.Subscribe(tenantID)
+	id, ch, cur, err := s.tenants.Subscribe(tenantID)
+	if err != nil {
+		return status.Error(codes.NotFound, err.Error())
+	}
 	defer s.tenants.Unsubscribe(tenantID, id)
 
 	// ⛔ The stream was authorised once, at its start, and used to be pushed

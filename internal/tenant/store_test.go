@@ -47,14 +47,14 @@ func TestMembership(t *testing.T) {
 	}{
 		"a verified address":              {Member{Email: "a@chem.univ-a.fr", EmailVerified: true}, []string{"chem"}},
 		"the same domain, any case":       {Member{Email: "a@CHEM.univ-a.fr", EmailVerified: true}, []string{"chem"}},
-		"an address nobody verified":      {Member{Email: "a@chem.univ-a.fr"}, []string{"default"}},
+		"an address nobody verified":      {Member{Email: "a@chem.univ-a.fr"}, nil},
 		"a group":                         {Member{Groups: []string{"urn:mace:univ-a.fr:hpc"}}, []string{"hpc"}},
 		"an institution":                  {Member{IdP: "https://idp.univ-b.fr/idp/shibboleth"}, []string{"univ-b"}},
 		"all three at once":               {Member{Email: "a@chem.univ-a.fr", EmailVerified: true, Groups: []string{"x", "urn:mace:univ-a.fr:hpc"}, IdP: "https://idp.univ-b.fr/idp/shibboleth"}, []string{"chem", "hpc", "univ-b"}},
-		"nothing that matches":            {Member{Email: "a@elsewhere.org", EmailVerified: true, Groups: []string{"other"}}, []string{"default"}},
-		"a group that only resembles":     {Member{Groups: []string{"urn:mace:univ-a.fr:hpc-staff"}}, []string{"default"}},
-		"an institution that resembles":   {Member{IdP: "https://idp.univ-b.fr/idp/shibboleth/"}, []string{"default"}},
-		"a domain that merely ends alike": {Member{Email: "a@xchem.univ-a.fr", EmailVerified: true}, []string{"default"}},
+		"nothing that matches":            {Member{Email: "a@elsewhere.org", EmailVerified: true, Groups: []string{"other"}}, nil},
+		"a group that only resembles":     {Member{Groups: []string{"urn:mace:univ-a.fr:hpc-staff"}}, nil},
+		"an institution that resembles":   {Member{IdP: "https://idp.univ-b.fr/idp/shibboleth/"}, nil},
+		"a domain that merely ends alike": {Member{Email: "a@xchem.univ-a.fr", EmailVerified: true}, nil},
 	} {
 		if got := ids(s.For(tc.m)); !eq(got, tc.want) {
 			t.Errorf("%s: %v, want %v", name, got, tc.want)

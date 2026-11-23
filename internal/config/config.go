@@ -113,11 +113,10 @@ func Load() (*Config, error) {
 	}
 	switch c.AuthProvider {
 	case "github":
-		// ⛔ Fail closed, with no escape hatch: with no org allowlist EVERY
-		// GitHub account is let in -- an open relay.
-		if len(c.GitHubAllowedOrgs) == 0 {
-			return nil, fmt.Errorf("AUTH_PROVIDER=github requires GITHUB_ALLOWED_ORGS: without it any GitHub account could enroll")
-		}
+		// ⛔ Fail closed, with no escape hatch: with neither an org allowlist
+		// nor tenants naming members EVERY GitHub account would be let in. The
+		// allowlist is optional only when tenants have members, which Load
+		// cannot see: the server checks it after seeding the tenants.
 	case "oidc":
 		required["OIDC_ISSUER"] = c.OIDCIssuer
 		required["OIDC_CLIENT_ID"] = c.OIDCClientID

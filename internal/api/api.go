@@ -165,6 +165,10 @@ func (s *Server) authenticated(next func(http.ResponseWriter, *http.Request, *au
 // offer the choice.
 func (s *Server) handleTenants(w http.ResponseWriter, _ *http.Request, claims *auth.Claims) {
 	ts := s.tenants.For(claims.Tenancy())
+	if len(ts) == 0 {
+		writeErr(w, http.StatusForbidden, "not_a_member", "you are not a member of any tenant")
+		return
+	}
 	out := make([]protocol.TenantInfo, 0, len(ts))
 	for _, t := range ts {
 		out = append(out, protocol.TenantInfo{ID: t.ID, Name: t.Name})
@@ -179,6 +183,10 @@ func (s *Server) handleTenants(w http.ResponseWriter, _ *http.Request, claims *a
 // refusal, with its error code and message.
 func (s *Server) chooseTenant(asked string, claims *auth.Claims) (string, int, [2]string) {
 	ts := s.tenants.For(claims.Tenancy())
+	// ⛔ Matching no tenant is a refusal: there is no default to fall into.
+	if len(ts) == 0 {
+		return "", http.StatusForbidden, [2]string{"not_a_member", "you are not a member of any tenant"}
+	}
 	if asked == "" {
 		if len(ts) == 1 {
 			return ts[0].ID, 0, [2]string{}
@@ -220,6 +228,12 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	tenantID, code, why := s.chooseTenant(req.Tenant, claims)
 	if code != 0 {
 		writeErr(w, code, why[0], why[1])
+		return
+	}
+	// An unknown tenant is an error, never the default tenant's routes.
+	rs, err := s.tenants.Routes(tenantID)
+	if err != nil {
+		writeErr(w, http.StatusForbidden, "not_a_member", err.Error())
 		return
 	}
 
@@ -296,7 +310,6 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 	}
 	s.log.Info("enrolled", "email", claims.Email, "ip", ip.String(), "device", req.Device.Name, "platform", req.Device.Platform)
 
-	rs := s.tenants.Routes(tenantID)
 	s.metrics.EnrollInc(tenantID)
 	s.log.Info("enrolled tenant routes", "tenant", tenantID, "email", claims.Email, "routes", rs.AllowedIPs)
 	writeJSON(w, http.StatusOK, protocol.EnrollResponse{

@@ -33,7 +33,11 @@ func TestPolicyOverridesAllowedIPs(t *testing.T) {
 	if err := s.Seed(ts[0]); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Routes(DefaultID).AllowedIPs; !reflect.DeepEqual(got, []string{"10.20.0.5/32"}) {
+	rs, err := s.Routes(DefaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rs.AllowedIPs; !reflect.DeepEqual(got, []string{"10.20.0.5/32"}) {
 		t.Fatalf("pushed routes = %v", got)
 	}
 }

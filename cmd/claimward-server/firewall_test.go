@@ -51,7 +51,11 @@ func TestLoadTenants(t *testing.T) {
 	if err := loadTenants(ts, good, quiet); err != nil {
 		t.Fatal(err)
 	}
-	if got := ts.Routes(tenant.DefaultID).AllowedIPs; len(got) != 1 || got[0] != "10.20.0.5/32" {
+	rs, err := ts.Routes(tenant.DefaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rs.AllowedIPs; len(got) != 1 || got[0] != "10.20.0.5/32" {
 		t.Fatalf("default routes = %v", got)
 	}
 }

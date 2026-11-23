@@ -45,7 +45,8 @@ A background reaper (every minute) removes peers whose lease expired (no heartbe
 
 Leases and tenants are held **in memory**: a restart forgets every enrollment
 and every tenant created through the admin API, leaving the `default` tenant
-seeded from `PUSH_ROUTES` and `DNS`. At startup the server therefore **removes
+seeded from `PUSH_ROUTES` and `DNS` (it names nobody until a `TENANTS_FILE`
+gives it `domains`, `groups`, `idps` or `members`). At startup the server therefore **removes
 the peers a previous run left** on the interface: those whose only allowed IP
 is a `/32` inside `VPN_CIDR`, the shape it gives every peer. Any other peer
 (configured by hand, a site-to-site link) is left alone. Kept, they would be
@@ -128,7 +129,31 @@ to every tenant that names any of:
 | `groups` | the token's `groups` claim (OIDC; go-authn: eduPerson entitlements), or the person's GitHub organisations |
 | `idps` | the institution that vouched for them: go-authn's `idp`, a SAML entity ID |
 
-A person who matches none belongs to the `default` tenant, and only then.
+| `members` | GitHub **logins**, named one by one (see below) |
+
+⛔ **A person who matches no tenant is refused**: `403 not_a_member` on
+`/api/v1/tenants` and `/api/v1/enroll`, and `Watch` is refused. There is no
+fallback tenant (before v0.5.0 such a person landed in `default`). The `default`
+tenant receives only those its own `domains`, `groups`, `idps` or `members`
+name, like any other. An unknown tenant ID is an error for the routes and the
+watch, not the `default` tenant's routes.
+
+### Named members, pinned to the account ID
+
+`members` lists GitHub logins, which are readable but can be renamed and then
+registered by somebody else. So the server **pins** each login to the account's
+numeric ID: when a tenant is loaded (`TENANTS_FILE`) or created/updated through
+the admin API, it asks `GET {GITHUB_API_URL}/users/{login}` (10 s timeout, 64 KiB
+answer cap, `type` must be `User`) and stores the pair. Membership is matched on
+the token's subject, `github:<id>`, never on the login: a renamed account whose
+old login now belongs to another person is refused. An unresolvable login is an
+error (the server does not start; the admin API answers `400`). The admin API
+and WebUI show the logins (and `pinned`, read-only); to follow a rename, edit
+the tenant again. Resolution is unauthenticated (60 requests an hour per
+address on github.com).
+
+A named member is also **admitted** by the GitHub entry gate without belonging
+to an allowed organisation.
 
 | | |
 |---|---|
@@ -137,7 +162,7 @@ A person who matches none belongs to the `default` tenant, and only then.
 | `POST /api/v1/heartbeat` | refused (`403 not_a_member`) once the person is no longer in the session's tenant |
 | RouteService `Watch` | streams the routes of the tenant **the device enrolled into**, found by its key, which must be the caller's |
 
-The admin API and WebUI edit the three membership lists beside the routes.
+The admin API and WebUI edit the four membership lists beside the routes.
 
 ## Access policy: what a peer may reach is enforced here
 
@@ -153,6 +178,7 @@ peer reaches only the file server on tcp/445 (SMB) and tcp+udp/88 (Kerberos):
 [
   {
     "id": "default",
+    "members": ["octocat"],
     "policy": [
       {"cidr": "10.20.0.5/32", "proto": "tcp", "ports": [445, 88]},
       {"cidr": "10.20.0.5/32", "proto": "udp", "ports": [88]}
@@ -163,7 +189,7 @@ peer reaches only the file server on tcp/445 (SMB) and tcp+udp/88 (Kerberos):
 
 Load it with `TENANTS_FILE=/etc/claimward/tenants.json` (a JSON array of
 tenants, with the same fields as the admin API: `id`, `name`, `domains`,
-`groups`, `idps`, `dns`, `policy`), or `POST`/`PUT` a tenant with a `policy`
+`groups`, `idps`, `members`, `dns`, `policy`), or `POST`/`PUT` a tenant with a `policy`
 to the admin API. A tenant file's `default` entry replaces `PUSH_ROUTES`.
 
 - **One source of truth.** The `AllowedIPs` pushed to clients are the distinct
@@ -204,7 +230,7 @@ not be skipped there.
 | Var | Required | Default | Notes |
 |-----|----------|---------|-------|
 | `AUTH_PROVIDER` | | `github` | identity provider: `github`, `oidc` or `go-authn` |
-| `GITHUB_ALLOWED_ORGS` | github | — | CSV org-membership allowlist. **REQUIRED with `AUTH_PROVIDER=github`**, with no opt-out: the server refuses to start without it, and the verifier refuses every token if it is empty (an empty list would admit any GitHub account) |
+| `GITHUB_ALLOWED_ORGS` | github | — | CSV org-membership allowlist. With `AUTH_PROVIDER=github` it is **optional only when at least one tenant has `members`**; with neither the server refuses to start, with no opt-out, and the verifier refuses every token (an empty gate would admit any GitHub account). A GitHub identity is admitted if it is in an allowed org OR is a named member of a tenant |
 | `GITHUB_API_URL` | | `https://api.github.com` | set for GitHub Enterprise |
 | `OIDC_ISSUER` | when `oidc` or `go-authn` | — | issuer URL (discovery) |
 | `OIDC_CLIENT_ID` | when `oidc` or `go-authn` | — | expected token audience |
