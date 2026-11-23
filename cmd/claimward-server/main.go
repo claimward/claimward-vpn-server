@@ -78,6 +78,7 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	ts := tenant.New(cfg.PushRoutes, cfg.DNS)
 	verifier, err := auth.New(ctx, auth.Options{
 		Provider:          cfg.AuthProvider,
 		Issuer:            cfg.OIDCIssuer,
@@ -119,9 +120,17 @@ func run(log *slog.Logger) error {
 	}
 
 	st := store.New()
-	ts := tenant.New(cfg.PushRoutes, cfg.DNS)
+	// Named members are pinned to their GitHub numeric IDs as the tenants are
+	// loaded; an unresolvable login stops the start.
+	ts.SetResolver(auth.NewGitHubResolver(cfg.GitHubAPIURL))
 	if err := loadTenants(ts, cfg.TenantsFile, log); err != nil {
 		return err
+	}
+	if err := checkEntryGate(cfg, ts); err != nil {
+		return err
+	}
+	if gv, ok := verifier.(*auth.GitHubVerifier); ok {
+		gv.WithMembers(ts)
 	}
 
 	// ⛔ Fail closed: what each peer may reach is ENFORCED here, by the

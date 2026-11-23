@@ -25,8 +25,10 @@ var claimsKey claimsKeyT
 type Server struct {
 	routespb.UnimplementedRouteServiceServer
 	tenants *tenant.Store
-	peers   *store.Store
-	recheck time.Duration // idle re-authorisation period; DefaultRecheck when zero
+
+	beforeSubscribe func() // test seam, nil in production
+	peers           *store.Store
+	recheck         time.Duration // idle re-authorisation period; DefaultRecheck when zero
 }
 
 // New returns a RouteService server.
@@ -51,7 +53,13 @@ func (s *Server) Watch(req *routespb.WatchRequest, stream routespb.RouteService_
 		return status.Error(codes.PermissionDenied, "you are not a member of the tenant this device enrolled into")
 	}
 
-	id, ch, cur := s.tenants.Subscribe(tenantID)
+	if s.beforeSubscribe != nil {
+		s.beforeSubscribe() // test seam: the tenant may be deleted right here
+	}
+	id, ch, cur, err := s.tenants.Subscribe(tenantID)
+	if err != nil {
+		return status.Error(codes.NotFound, err.Error())
+	}
 	defer s.tenants.Unsubscribe(tenantID, id)
 
 	// ⛔ The stream was authorised once, at its start, and used to be pushed

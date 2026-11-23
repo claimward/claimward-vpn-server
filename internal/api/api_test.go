@@ -34,8 +34,10 @@ func (t tokens) Verify(_ context.Context, bearer string) (*auth.Claims, error) {
 }
 
 var people = tokens{
-	"alice": {Subject: "sub-alice", Email: "alice@example.org"},
-	"bob":   {Subject: "sub-bob", Email: "bob@example.org"},
+	"alice": {Subject: "sub-alice", Email: "alice@example.org", EmailVerified: true},
+	"bob":   {Subject: "sub-bob", Email: "bob@example.org", EmailVerified: true},
+	// frank matches no tenant: he must be refused, not put in a default one.
+	"frank": {Subject: "sub-frank", Email: "frank@elsewhere.net", EmailVerified: true},
 }
 
 func newServer(t *testing.T) (*Server, *store.Store) {
@@ -48,6 +50,10 @@ func newServer(t *testing.T) (*Server, *store.Store) {
 	}
 	st := store.New()
 	ts := tenant.New([]string{cfg.VPNCIDR}, nil)
+	// The default tenant takes only whom it names: here, the example.org domain.
+	if err := ts.Seed(tenant.Tenant{ID: tenant.DefaultID, Name: "Default", Domains: []string{"example.org"}, AllowedIPs: []string{cfg.VPNCIDR}}); err != nil {
+		t.Fatal(err)
+	}
 	return New(cfg, people, alloc, st, wg.NewDryRunGateway(log), ts, metrics.New(st, ts), "c2VydmVy", log), st
 }
 
@@ -231,7 +237,7 @@ func TestAPersonInSeveralTenantsChooses(t *testing.T) {
 	if w := call(t, h, protocol.PathEnroll, "dave", protocol.EnrollRequest{PublicKey: daveKey}); w.Code != http.StatusOK || st.Get(daveKey).Tenant != "hpc" {
 		t.Errorf("dave: %d %s", w.Code, w.Body)
 	}
-	// Alice matches none: the default tenant, as before tenants were many.
+	// Alice is in the default tenant because it names her domain.
 	if w := get(t, h, protocol.PathTenants, "alice"); !strings.Contains(w.Body.String(), `"default"`) {
 		t.Errorf("alice is offered %s", w.Body)
 	}

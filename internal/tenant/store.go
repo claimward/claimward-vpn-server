@@ -4,18 +4,24 @@
 //
 // A person may belong to several tenants, and chooses one per session (the
 // enrollment names it). Membership is by any of: the verified email's domain,
-// a group the identity provider says they are in, or the institution that
-// vouched for them (a go-authn provider's "idp"). Somebody who matches no
-// tenant belongs to the default one, and only then.
+// a group the identity provider says they are in, the institution that
+// vouched for them (a go-authn provider's "idp"), or being NAMED: a GitHub
+// login the tenant lists, pinned to the account's numeric ID. Somebody who
+// matches no tenant belongs to none, and is refused: there is no fallback.
 //
 // State is in-memory (MVP), mirroring the rest of the server.
 package tenant
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/claimward/claimward-vpn-server/internal/policy"
 )
@@ -30,6 +36,14 @@ type Tenant struct {
 	Domains []string `json:"domains"` // verified email domains that are members
 	Groups  []string `json:"groups"`  // groups (token "groups" claim, GitHub orgs) that are members
 	IdPs    []string `json:"idps"`    // institutions (go-authn "idp", a SAML entity ID) that are members
+	// Members are GitHub LOGINS, named one by one. A login can be renamed and
+	// then claimed by somebody else, so the store never matches on it: it
+	// resolves each to the account's numeric ID when the tenant is saved and
+	// matches the token's subject ("github:<id>") against that.
+	Members []string `json:"members,omitempty"`
+	// Pinned is the login -> numeric ID of each member, as resolved. Read-only:
+	// whatever a client sends here is replaced.
+	Pinned map[string]int64 `json:"pinned,omitempty"`
 	// Policy is what the tenant's peers may reach: the gateway ENFORCES it
 	// (internal/fw) and the routes pushed to clients derive from it. When it
 	// is set, AllowedIPs is overwritten with those routes.
@@ -80,6 +94,104 @@ type Store struct {
 	nextSub int
 
 	onChange func() // after a tenant's policy or existence changes
+	resolver Resolver
+}
+
+// Resolver turns a GitHub login into the account's numeric ID, or fails: an
+// unknown login is an error, never a guess.
+type Resolver func(ctx context.Context, login string) (int64, error)
+
+// SetResolver registers how member logins are pinned. Without one, a tenant
+// naming members is refused.
+func (s *Store) SetResolver(r Resolver) {
+	s.mu.Lock()
+	s.resolver = r
+	s.mu.Unlock()
+}
+
+// ErrUnknownTenant is returned for a tenant ID that does not exist.
+var ErrUnknownTenant = errors.New("unknown tenant")
+
+var loginRE = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$`)
+
+// resolveTimeout bounds the resolution of one tenant's members.
+const resolveTimeout = 30 * time.Second
+
+// pin validates t.Members and pins each login to its numeric ID. The network
+// calls run without the store's lock held.
+func (s *Store) pin(t *Tenant) error {
+	t.Pinned = nil
+	if len(t.Members) == 0 {
+		t.Members = nil
+		return nil
+	}
+	s.mu.Lock()
+	r := s.resolver
+	s.mu.Unlock()
+	if r == nil {
+		return fmt.Errorf("members need a GitHub resolver, and none is configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)
+	defer cancel()
+	seen := map[string]bool{}
+	var logins []string
+	pinned := map[string]int64{}
+	for _, l := range t.Members {
+		l = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "@"))
+		if !loginRE.MatchString(l) {
+			return fmt.Errorf("member %q is not a GitHub login", l)
+		}
+		key := strings.ToLower(l)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		id, err := r(ctx, l)
+		if err != nil {
+			return fmt.Errorf("member %q: %w", l, err)
+		}
+		if id <= 0 {
+			return fmt.Errorf("member %q: no account ID", l)
+		}
+		logins = append(logins, l)
+		pinned[key] = id
+	}
+	t.Members, t.Pinned = logins, pinned
+	return nil
+}
+
+// NamedMember is whether subject ("github:<id>") is pinned by any tenant.
+func (s *Store) NamedMember(subject string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, st := range s.tenants {
+		if st.t.names(subject) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasNamedMembers is whether any tenant names a member.
+func (s *Store) HasNamedMembers() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, st := range s.tenants {
+		if len(st.t.Pinned) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// names is whether subject is one of the tenant's pinned accounts.
+func (t Tenant) names(subject string) bool {
+	for _, id := range t.Pinned {
+		if subject == "github:"+strconv.FormatInt(id, 10) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetOnChange registers fn, called (outside the store's lock) after a tenant
@@ -113,6 +225,9 @@ func (s *Store) Seed(t Tenant) error {
 	if err := t.normalize(); err != nil {
 		return fmt.Errorf("tenant %q: %w", t.ID, err)
 	}
+	if err := s.pin(&t); err != nil {
+		return fmt.Errorf("tenant %q: %w", t.ID, err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t.Serial = 1
@@ -137,6 +252,7 @@ func New(defaultAllowedIPs, defaultDNS []string) *Store {
 
 // Member is what tenants are matched on: who somebody is, as their token says.
 type Member struct {
+	Subject       string // provider-scoped ID, "github:<id>": what named members are matched on
 	Email         string
 	EmailVerified bool
 	Groups        []string
@@ -149,6 +265,9 @@ type Member struct {
 // the person typed, and typing somebody else's domain would be joining their
 // tenant.
 func (t Tenant) has(m Member) bool {
+	if t.names(m.Subject) {
+		return true
+	}
 	if m.EmailVerified {
 		if at := strings.LastIndex(m.Email, "@"); at >= 0 {
 			domain := m.Email[at+1:]
@@ -176,8 +295,8 @@ func (t Tenant) has(m Member) bool {
 	return false
 }
 
-// For is every tenant m belongs to, by ID; the default tenant alone when m
-// matches none.
+// For is every tenant m belongs to, by ID; none when m matches none. There is
+// no fallback: the default tenant receives only those it names.
 func (s *Store) For(m Member) []Tenant {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -186,9 +305,6 @@ func (s *Store) For(m Member) []Tenant {
 		if st.t.has(m) {
 			out = append(out, st.t)
 		}
-	}
-	if len(out) == 0 {
-		return []Tenant{s.tenants[DefaultID].t}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -204,15 +320,16 @@ func (s *Store) IsMember(id string, m Member) bool {
 	return false
 }
 
-// Routes returns the current route set for a tenant (default if unknown).
-func (s *Store) Routes(tenantID string) RouteSet {
+// Routes returns the current route set for a tenant; an unknown tenant is
+// ErrUnknownTenant, never the default tenant's routes.
+func (s *Store) Routes(tenantID string) (RouteSet, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.tenants[tenantID]
 	if st == nil {
-		st = s.tenants[DefaultID]
+		return RouteSet{}, fmt.Errorf("%w %q", ErrUnknownTenant, tenantID)
 	}
-	return RouteSet{AllowedIPs: st.t.AllowedIPs, DNS: st.t.DNS, Serial: st.t.Serial}
+	return RouteSet{AllowedIPs: st.t.AllowedIPs, DNS: st.t.DNS, Serial: st.t.Serial}, nil
 }
 
 // List returns all tenants, sorted by ID.
@@ -250,6 +367,9 @@ func (s *Store) Create(t Tenant) (Tenant, error) {
 	if err := t.normalize(); err != nil {
 		return Tenant{}, err
 	}
+	if err := s.pin(&t); err != nil {
+		return Tenant{}, err
+	}
 	s.mu.Lock()
 	if _, exists := s.tenants[t.ID]; exists {
 		s.mu.Unlock()
@@ -268,6 +388,9 @@ func (s *Store) Update(id string, in Tenant) (Tenant, error) {
 	if err := in.normalize(); err != nil {
 		return Tenant{}, err
 	}
+	if err := s.pin(&in); err != nil {
+		return Tenant{}, err
+	}
 	s.mu.Lock()
 	st, ok := s.tenants[id]
 	if !ok {
@@ -278,6 +401,8 @@ func (s *Store) Update(id string, in Tenant) (Tenant, error) {
 	st.t.Domains = in.Domains
 	st.t.Groups = in.Groups
 	st.t.IdPs = in.IdPs
+	st.t.Members = in.Members
+	st.t.Pinned = in.Pinned
 	st.t.Policy = in.Policy
 	st.t.AllowedIPs = in.AllowedIPs
 	st.t.DNS = in.DNS
@@ -311,27 +436,28 @@ func (s *Store) Delete(id string) error {
 
 // Subscribe registers a watcher for a tenant; returns an id, a channel of future
 // updates, and the current set to send immediately.
-func (s *Store) Subscribe(tenantID string) (int, <-chan RouteSet, RouteSet) {
+// An unknown tenant is ErrUnknownTenant, never the default tenant's routes.
+func (s *Store) Subscribe(tenantID string) (int, <-chan RouteSet, RouteSet, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.tenants[tenantID]
 	if st == nil {
-		st = s.tenants[DefaultID]
+		return 0, nil, RouteSet{}, fmt.Errorf("%w %q", ErrUnknownTenant, tenantID)
 	}
 	id := s.nextSub
 	s.nextSub++
 	ch := make(chan RouteSet, 1)
 	st.subs[id] = ch
-	return id, ch, RouteSet{AllowedIPs: st.t.AllowedIPs, DNS: st.t.DNS, Serial: st.t.Serial}
+	return id, ch, RouteSet{AllowedIPs: st.t.AllowedIPs, DNS: st.t.DNS, Serial: st.t.Serial}, nil
 }
 
-// Unsubscribe removes a watcher.
+// Unsubscribe removes a watcher; an unknown tenant has none.
 func (s *Store) Unsubscribe(tenantID string, id int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.tenants[tenantID]
 	if st == nil {
-		st = s.tenants[DefaultID]
+		return
 	}
 	if ch, ok := st.subs[id]; ok {
 		delete(st.subs, id)

@@ -77,5 +77,5 @@ func New(ctx context.Context, opts Options) (Verifier, error) {
 
 // Tenancy is what tenants are matched on, from these claims.
 func (c *Claims) Tenancy() tenant.Member {
-	return tenant.Member{Email: c.Email, EmailVerified: c.EmailVerified, Groups: c.Groups, IdP: c.IdP}
+	return tenant.Member{Subject: c.Subject, Email: c.Email, EmailVerified: c.EmailVerified, Groups: c.Groups, IdP: c.IdP}
 }

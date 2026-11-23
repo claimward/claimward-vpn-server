@@ -51,7 +51,11 @@ func TestLoadTenants(t *testing.T) {
 	if err := loadTenants(ts, good, quiet); err != nil {
 		t.Fatal(err)
 	}
-	if got := ts.Routes(tenant.DefaultID).AllowedIPs; len(got) != 1 || got[0] != "10.20.0.5/32" {
+	rs, err := ts.Routes(tenant.DefaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rs.AllowedIPs; len(got) != 1 || got[0] != "10.20.0.5/32" {
 		t.Fatalf("default routes = %v", got)
 	}
 }
@@ -78,6 +82,21 @@ func TestRunRefusesABadTenantsFile(t *testing.T) {
 	defer stop.Stop()
 	if err := run(quiet); err == nil {
 		t.Fatal("run went on with an unreadable tenants file")
+	}
+}
+
+// ⛔ No orgs and no named members: run itself refuses, with no opt-out.
+func TestRunRefusesAnOpenGitHubGate(t *testing.T) {
+	runEnv(t)
+	t.Setenv("GITHUB_ALLOWED_ORGS", "")
+	stop := time.AfterFunc(3*time.Second, func() {
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = p.Signal(os.Interrupt)
+		}
+	})
+	defer stop.Stop()
+	if err := run(quiet); err == nil {
+		t.Fatal("run started with no org allowlist and no named member")
 	}
 }
 
