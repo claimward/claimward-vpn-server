@@ -95,8 +95,9 @@ func TestFstatFailureIsAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.Close() // Fstat on a closed descriptor fails
-	if err := checkFile(f, "p", AdminToken); err == nil {
-		t.Fatal("a closed descriptor passed the check")
+	err = checkFile(f, "p", AdminToken)
+	if err == nil || strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("want the fstat error itself, got %v", err)
 	}
 }
 
