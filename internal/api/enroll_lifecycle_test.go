@@ -56,6 +56,29 @@ func TestOneSubjectCannotExhaustThePool(t *testing.T) {
 	}
 }
 
+// The cap is configurable, applies per subject, and a re-enroll of an
+// enrolled key is never counted against it.
+func TestConfiguredDeviceCapIsHonoured(t *testing.T) {
+	s, _ := newServer(t)
+	s.cfg.MaxDevicesPerSubject = 2
+	h := s.Handler()
+	first := newKey(t)
+	for _, k := range []string{first, newKey(t)} {
+		if w := call(t, h, protocol.PathEnroll, "alice", protocol.EnrollRequest{PublicKey: k}); w.Code != 200 {
+			t.Fatalf("within the cap: %d %s", w.Code, w.Body)
+		}
+	}
+	if w := call(t, h, protocol.PathEnroll, "alice", protocol.EnrollRequest{PublicKey: newKey(t)}); w.Code != 429 {
+		t.Errorf("third device over a cap of 2: %d, want 429", w.Code)
+	}
+	if w := call(t, h, protocol.PathEnroll, "alice", protocol.EnrollRequest{PublicKey: first}); w.Code != 200 {
+		t.Errorf("re-enrolling an enrolled key at the cap: %d %s", w.Code, w.Body)
+	}
+	if w := call(t, h, protocol.PathEnroll, "bob", protocol.EnrollRequest{PublicKey: newKey(t)}); w.Code != 200 {
+		t.Errorf("another subject at alice's cap: %d %s", w.Code, w.Body)
+	}
+}
+
 // barrierGW blocks every AddPeer until two have arrived, forcing two
 // concurrent enrollments of one key to interleave between Get and Put.
 type barrierGW struct {
