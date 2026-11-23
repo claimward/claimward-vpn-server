@@ -68,6 +68,12 @@ func runEnv(t *testing.T) {
 func TestRunRefusesABadTenantsFile(t *testing.T) {
 	runEnv(t)
 	t.Setenv("TENANTS_FILE", filepath.Join(t.TempDir(), "absent.json"))
+	stop := time.AfterFunc(3*time.Second, func() {
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = p.Signal(os.Interrupt)
+		}
+	})
+	defer stop.Stop()
 	if err := run(quiet); err == nil {
 		t.Fatal("run went on with an unreadable tenants file")
 	}
