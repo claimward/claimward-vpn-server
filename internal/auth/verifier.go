@@ -48,6 +48,7 @@ func (v *OIDCVerifier) Verify(ctx context.Context, rawIDToken string) (*Claims, 
 		EmailVerified: raw.EmailVerified,
 		Login:         raw.PreferredUsername,
 		Groups:        stringList(raw.Groups),
+		Expires:       tok.Expiry,
 	}
 
 	if len(v.allowedDomains) > 0 && !domainAllowed(claims.Email, v.allowedDomains) {
