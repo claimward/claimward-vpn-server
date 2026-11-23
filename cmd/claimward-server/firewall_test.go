@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/claimward/claimward-vpn-server/internal/fw"
 	"github.com/claimward/claimward-vpn-server/internal/store"
@@ -78,6 +79,13 @@ func TestRunDoesNotStartWithoutAFirewall(t *testing.T) {
 	old := newApplier
 	t.Cleanup(func() { newApplier = old })
 	newApplier = func(bool, *slog.Logger) fw.Applier { return &applier{err: errors.New("EPERM")} }
+	// Were the guard gone, run would serve: end it rather than hang the suite.
+	stop := time.AfterFunc(3*time.Second, func() {
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = p.Signal(os.Interrupt)
+		}
+	})
+	defer stop.Stop()
 	if err := run(quiet); err == nil {
 		t.Fatal("run started without a firewall")
 	}
