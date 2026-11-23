@@ -30,6 +30,25 @@ jobs:
       - run: go vet ./...
       - run: CGO_ENABLED=0 go test -count=1 ./...
 
+  # The firewall is enforced by the kernel: this lane runs the network
+  # namespace test as root and must not skip it.
+  netns:
+    name: netns (nftables enforcement)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+      - run: sudo modprobe nf_tables || true
+      - run: CGO_ENABLED=0 go test -c -o fw.test ./internal/fw
+      # The runner's Docker leaves FORWARD at DROP in its own table, which would
+      # drop forwarded packets regardless of claimward's table.
+      - run: sudo iptables -P FORWARD ACCEPT || true
+      - run: sudo CW_REQUIRE_NETNS=1 ./fw.test -test.v -test.count=1 -test.run 'TestNetnsPolicyIsEnforced'
+      - if: failure()
+        run: sudo nft list ruleset; sudo iptables -S FORWARD || true
+
   crossbuild:
     name: cross-build (${{ matrix.goarch }})
     runs-on: ubuntu-latest
@@ -43,4 +62,20 @@ jobs:
         with:
           go-version: '1.27.3'
       - run: CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} go build ./...
+
+  # nftables is Linux only: the !linux stub (which refuses to start without a
+  # firewall) must keep compiling for development machines.
+  devbuild:
+    name: dev build (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [darwin, windows]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+      - run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=amd64 go build ./... && CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=amd64 go vet ./internal/fw
 

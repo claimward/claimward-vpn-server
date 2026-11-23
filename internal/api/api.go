@@ -39,12 +39,36 @@ type Server struct {
 	// peers, when set, is the provider's list of registered keys: a key is
 	// enrolled only if its owner registered it there (AUTH_PROVIDER=go-authn).
 	peers Registry
+
+	// fwSync reinstalls the gateway's firewall from the current peers and
+	// tenants (internal/fw); nil means no firewall (tests, dry-run).
+	fwSync func() error
 }
 
 // Registry says whose a WireGuard key is, and until when -- the go-authn
 // provider's list (internal/peers).
 type Registry interface {
 	Lookup(key string) (wireguard.Peer, bool)
+}
+
+// UseFirewall makes the gateway's firewall follow the enrolled peers: sync is
+// called after every change to them, and an enrollment whose sync fails is
+// refused.
+func (s *Server) UseFirewall(sync func() error) { s.fwSync = sync }
+
+func (s *Server) syncFirewall() error {
+	if s.fwSync == nil {
+		return nil
+	}
+	return s.fwSync()
+}
+
+// resyncFirewall is after a peer LEFT: the table is rebuilt without it. A
+// failure leaves deny-all installed (see fw.Manager.Sync) and is logged.
+func (s *Server) resyncFirewall() {
+	if err := s.syncFirewall(); err != nil {
+		s.log.Error("firewall sync failed; deny-all installed", "err", err)
+	}
 }
 
 // UsePeers makes enrollment depend on reg: a key must be registered there,
@@ -71,10 +95,17 @@ func (s *Server) registered(key string, claims *auth.Claims, lease time.Time) (t
 // Reconcile drops every enrolled peer allowed no longer: a key the provider
 // took back, or one now registered to somebody else.
 func (s *Server) Reconcile(allowed func(key, subject string) bool) {
+	removed := false
+	defer func() {
+		if removed {
+			s.resyncFirewall()
+		}
+	}()
 	for _, p := range s.store.List() {
 		if allowed(p.PublicKey, p.Subject) {
 			continue
 		}
+		removed = true
 		if pub, err := wgtypes.ParseKey(p.PublicKey); err == nil {
 			if err := s.gw.RemovePeer(pub); err != nil {
 				s.log.Error("reconcile remove peer failed", "err", err)
@@ -223,6 +254,20 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *au
 		LeaseExpiry: expiry,
 		Tenant:      tenantID,
 	})
+	// ⛔ Fail closed: a peer is only up once the gateway's firewall knows it.
+	// Without that rule set it would be in no tenant's set, so dropped anyway;
+	// but a device told it is enrolled that cannot reach anything is worse than
+	// an error, and a half-enrolled peer must not stay on the interface.
+	if err := s.syncFirewall(); err != nil {
+		if rerr := s.gw.RemovePeer(pub); rerr != nil {
+			s.log.Error("remove peer after firewall failure", "err", rerr)
+		}
+		s.store.Delete(req.PublicKey)
+		s.alloc.Release(ip)
+		s.log.Error("firewall sync failed, enrollment refused", "err", err)
+		writeErr(w, http.StatusInternalServerError, "gateway_error", "could not program gateway firewall")
+		return
+	}
 	s.log.Info("enrolled", "email", claims.Email, "ip", ip.String(), "device", req.Device.Name, "platform", req.Device.Platform)
 
 	rs := s.tenants.Routes(tenantID)
@@ -289,6 +334,7 @@ func (s *Server) handleDeregister(w http.ResponseWriter, r *http.Request, claims
 	}
 	s.store.Delete(req.PublicKey)
 	s.alloc.Release(peer.IP)
+	s.resyncFirewall()
 	s.log.Info("deregistered", "email", claims.Email, "ip", peer.IP.String())
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -296,7 +342,13 @@ func (s *Server) handleDeregister(w http.ResponseWriter, r *http.Request, claims
 // ReapExpired removes peers whose lease has ended. Called periodically.
 func (s *Server) ReapExpired() {
 	now := time.Now()
-	for _, p := range s.store.Expired(now) {
+	expired := s.store.Expired(now)
+	defer func() {
+		if len(expired) > 0 {
+			s.resyncFirewall()
+		}
+	}()
+	for _, p := range expired {
 		if pub, err := wgtypes.ParseKey(p.PublicKey); err == nil {
 			if err := s.gw.RemovePeer(pub); err != nil {
 				s.log.Error("reap remove peer failed", "err", err)

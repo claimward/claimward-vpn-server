@@ -120,8 +120,21 @@ func run(log *slog.Logger) error {
 
 	st := store.New()
 	ts := tenant.New(cfg.PushRoutes, cfg.DNS)
+	if err := loadTenants(ts, cfg.TenantsFile, log); err != nil {
+		return err
+	}
+
+	// ⛔ Fail closed: what each peer may reach is ENFORCED here, by the
+	// kernel's nftables, before any peer can be enrolled. If the ruleset
+	// cannot be installed the server does not start.
+	fwm, err := startFirewall(cfg.WGInterface, newApplier(cfg.DryRun, log), ts, st, log)
+	if err != nil {
+		return err
+	}
+
 	m := metrics.New(st, ts)
 	srv := api.New(cfg, verifier, alloc, st, gw, ts, m, serverPub, log)
+	srv.UseFirewall(fwm.Sync)
 
 	// go-authn: a device's key must be one its owner registered with the
 	// provider, and a key the provider takes back is dropped here.

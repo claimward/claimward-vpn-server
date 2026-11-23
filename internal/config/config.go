@@ -47,11 +47,14 @@ type Config struct {
 	WGServerPrivKey string // resolved private key (internal, filled by Load)
 	DryRun          bool   // if true, don't touch a real device — log peer ops
 
-	VPNCIDR    string        // pool, e.g. "10.80.0.0/24"; server takes the first host
-	PushRoutes []string      // AllowedIPs pushed to clients; defaults to [VPNCIDR]
-	DNS        []string      // optional DNS servers pushed to clients
-	Keepalive  int           // persistent keepalive seconds advertised to clients
-	LeaseTTL   time.Duration // how long an enrollment lasts without a heartbeat
+	VPNCIDR    string   // pool, e.g. "10.80.0.0/24"; server takes the first host
+	PushRoutes []string // AllowedIPs pushed to clients; defaults to [VPNCIDR]
+	// TenantsFile is a JSON file of tenants with their access policies
+	// (see internal/tenant ParseFile). Tenant "default" overrides PUSH_ROUTES.
+	TenantsFile string
+	DNS         []string      // optional DNS servers pushed to clients
+	Keepalive   int           // persistent keepalive seconds advertised to clients
+	LeaseTTL    time.Duration // how long an enrollment lasts without a heartbeat
 }
 
 // Load reads configuration from the environment and validates required fields.
@@ -75,6 +78,7 @@ func Load() (*Config, error) {
 		DryRun:            boolEnv("WG_DRYRUN", false),
 		VPNCIDR:           env("VPN_CIDR", "10.80.0.0/24"),
 		PushRoutes:        splitCSV(os.Getenv("PUSH_ROUTES")),
+		TenantsFile:       os.Getenv("TENANTS_FILE"),
 		DNS:               splitCSV(os.Getenv("DNS")),
 		Keepalive:         intEnv("KEEPALIVE", 25),
 		LeaseTTL:          durEnv("LEASE_TTL", 24*time.Hour),

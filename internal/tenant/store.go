@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/claimward/claimward-vpn-server/internal/policy"
 )
 
 // DefaultID is the tenant used for identities that match no domain.
@@ -23,14 +25,40 @@ const DefaultID = "default"
 
 // Tenant is the persisted configuration of a tenant.
 type Tenant struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Domains    []string `json:"domains"` // verified email domains that are members
-	Groups     []string `json:"groups"`  // groups (token "groups" claim, GitHub orgs) that are members
-	IdPs       []string `json:"idps"`    // institutions (go-authn "idp", a SAML entity ID) that are members
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Domains []string `json:"domains"` // verified email domains that are members
+	Groups  []string `json:"groups"`  // groups (token "groups" claim, GitHub orgs) that are members
+	IdPs    []string `json:"idps"`    // institutions (go-authn "idp", a SAML entity ID) that are members
+	// Policy is what the tenant's peers may reach: the gateway ENFORCES it
+	// (internal/fw) and the routes pushed to clients derive from it. When it
+	// is set, AllowedIPs is overwritten with those routes.
+	Policy []policy.Rule `json:"policy,omitempty"`
+	// AllowedIPs, with no Policy, is the legacy form: every protocol and port
+	// to those CIDRs.
 	AllowedIPs []string `json:"allowed_ips"`
 	DNS        []string `json:"dns"`
 	Serial     uint64   `json:"serial"`
+}
+
+// Rules is the tenant's effective policy: Policy, or the legacy form of
+// AllowedIPs. A tenant with neither reaches nothing.
+func (t Tenant) Rules() []policy.Rule {
+	if len(t.Policy) > 0 {
+		return t.Policy
+	}
+	return policy.Legacy(t.AllowedIPs)
+}
+
+// normalize validates the policy and derives the routes from it.
+func (t *Tenant) normalize() error {
+	if err := policy.Validate(t.Policy); err != nil {
+		return err
+	}
+	if len(t.Policy) > 0 {
+		t.AllowedIPs = policy.Routes(t.Policy)
+	}
+	return nil
 }
 
 // RouteSet is what a watcher receives.
@@ -50,6 +78,51 @@ type Store struct {
 	mu      sync.Mutex
 	tenants map[string]*tenantState
 	nextSub int
+
+	onChange func() // after a tenant's policy or existence changes
+}
+
+// SetOnChange registers fn, called (outside the store's lock) after a tenant
+// is created, updated or deleted: the gateway re-installs its firewall.
+func (s *Store) SetOnChange(fn func()) {
+	s.mu.Lock()
+	s.onChange = fn
+	s.mu.Unlock()
+}
+
+func (s *Store) changed() {
+	s.mu.Lock()
+	fn := s.onChange
+	s.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// Seed creates tenant t, or replaces the configuration of the one with that
+// ID (the default tenant, from a tenants file). Startup only: no watcher is
+// told and no callback runs.
+func (s *Store) Seed(t Tenant) error {
+	t.ID = slug(t.ID)
+	if t.ID == "" {
+		t.ID = slug(t.Name)
+	}
+	if t.ID == "" {
+		return fmt.Errorf("tenant id or name required")
+	}
+	if err := t.normalize(); err != nil {
+		return fmt.Errorf("tenant %q: %w", t.ID, err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t.Serial = 1
+	if old, ok := s.tenants[t.ID]; ok {
+		t.Serial = old.t.Serial + 1
+		old.t = t
+		return nil
+	}
+	s.tenants[t.ID] = &tenantState{t: t, subs: map[int]chan RouteSet{}}
+	return nil
 }
 
 // New creates a Store seeded with a default tenant carrying the given routes.
@@ -174,34 +247,46 @@ func (s *Store) Create(t Tenant) (Tenant, error) {
 	if t.ID == "" {
 		return Tenant{}, fmt.Errorf("tenant id or name required")
 	}
+	if err := t.normalize(); err != nil {
+		return Tenant{}, err
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if _, exists := s.tenants[t.ID]; exists {
+		s.mu.Unlock()
 		return Tenant{}, fmt.Errorf("tenant %q already exists", t.ID)
 	}
 	t.Serial = 1
 	s.tenants[t.ID] = &tenantState{t: t, subs: map[int]chan RouteSet{}}
+	s.mu.Unlock()
+	s.changed()
 	return t, nil
 }
 
 // Update replaces a tenant's metadata and routes, bumps the serial, and pushes
 // the new route set to that tenant's watchers.
 func (s *Store) Update(id string, in Tenant) (Tenant, error) {
+	if err := in.normalize(); err != nil {
+		return Tenant{}, err
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	st, ok := s.tenants[id]
 	if !ok {
+		s.mu.Unlock()
 		return Tenant{}, fmt.Errorf("tenant %q not found", id)
 	}
 	st.t.Name = in.Name
 	st.t.Domains = in.Domains
 	st.t.Groups = in.Groups
 	st.t.IdPs = in.IdPs
+	st.t.Policy = in.Policy
 	st.t.AllowedIPs = in.AllowedIPs
 	st.t.DNS = in.DNS
 	st.t.Serial++
 	s.broadcastLocked(st)
-	return st.t, nil
+	out := st.t
+	s.mu.Unlock()
+	s.changed()
+	return out, nil
 }
 
 // Delete removes a tenant (not the default one).
@@ -210,15 +295,17 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("cannot delete the default tenant")
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	st, ok := s.tenants[id]
 	if !ok {
+		s.mu.Unlock()
 		return fmt.Errorf("tenant %q not found", id)
 	}
 	for _, ch := range st.subs {
 		close(ch)
 	}
 	delete(s.tenants, id)
+	s.mu.Unlock()
+	s.changed()
 	return nil
 }
 
