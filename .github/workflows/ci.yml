@@ -58,3 +58,19 @@ jobs:
           go-version: '1.27.3'
       - run: CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} go build ./...
 
+  # nftables is Linux only: the !linux stub (which refuses to start without a
+  # firewall) must keep compiling for development machines.
+  devbuild:
+    name: dev build (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [darwin, windows]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+      - run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=amd64 go build ./... && CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=amd64 go vet ./internal/fw
+
