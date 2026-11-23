@@ -121,21 +121,8 @@ func run(log *slog.Logger) error {
 
 	st := store.New()
 	ts := tenant.New(cfg.PushRoutes, cfg.DNS)
-	if cfg.TenantsFile != "" {
-		data, err := os.ReadFile(cfg.TenantsFile)
-		if err != nil {
-			return fmt.Errorf("read TENANTS_FILE: %w", err)
-		}
-		tenants, err := tenant.ParseFile(data)
-		if err != nil {
-			return err
-		}
-		for _, t := range tenants {
-			if err := ts.Seed(t); err != nil {
-				return err
-			}
-		}
-		log.Info("tenants loaded", "file", cfg.TenantsFile, "tenants", len(tenants))
+	if err := loadTenants(ts, cfg.TenantsFile, log); err != nil {
+		return err
 	}
 
 	// ⛔ Fail closed: what each peer may reach is ENFORCED here, by the
@@ -145,15 +132,10 @@ func run(log *slog.Logger) error {
 	if cfg.DryRun {
 		applier = fw.Discard{Log: log}
 	}
-	fwm := fw.NewManager(cfg.WGInterface, applier, fw.FromStores(ts, st), log)
-	if err := fwm.Sync(); err != nil {
-		return fmt.Errorf("install the gateway firewall (needs Linux and CAP_NET_ADMIN; WG_DRYRUN=true for development): %w", err)
+	fwm, err := startFirewall(cfg.WGInterface, applier, ts, st, log)
+	if err != nil {
+		return err
 	}
-	ts.SetOnChange(func() {
-		if err := fwm.Sync(); err != nil {
-			log.Error("firewall sync after a tenant change failed; deny-all installed", "err", err)
-		}
-	})
 
 	m := metrics.New(st, ts)
 	srv := api.New(cfg, verifier, alloc, st, gw, ts, m, serverPub, log)

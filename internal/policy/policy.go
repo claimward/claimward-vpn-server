@@ -56,29 +56,22 @@ func (p Port) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON accepts 445, "445" and "1024-2048".
 func (p *Port) UnmarshalJSON(b []byte) error {
 	s := strings.TrimSpace(string(b))
-	if strings.HasPrefix(s, `"`) {
-		var str string
-		if err := json.Unmarshal(b, &str); err != nil {
-			return err
-		}
-		s = str
+	var str string
+	if json.Unmarshal(b, &str) == nil {
+		s = str // a JSON string; anything else is read as it is, and refused below
 	}
-	if len(s) == 0 || len(s) > maxPortSpecBytes {
+	if len(s) > maxPortSpecBytes {
 		return fmt.Errorf("invalid port %q", s)
 	}
 	lo, hi, isRange := strings.Cut(s, "-")
-	l, err := parsePort(lo)
-	if err != nil {
-		return err
-	}
-	h := l
+	l, errLo := parsePort(lo)
+	h, errHi := l, errLo
 	if isRange {
-		if h, err = parsePort(hi); err != nil {
-			return err
-		}
+		h, errHi = parsePort(hi)
 	}
-	if h < l {
-		return fmt.Errorf("port range %q is backwards", s)
+	// A failed parse is 0, so a bad bound is also "backwards"; one check.
+	if errLo != nil || errHi != nil || h < l {
+		return fmt.Errorf("invalid port or range %q (want 1-65535, or lo-hi with lo <= hi)", s)
 	}
 	*p = Port{l, h}
 	return nil
@@ -107,13 +100,10 @@ func (r Rule) Prefix() netip.Prefix {
 
 // Validate refuses a rule that could not be enforced exactly as written.
 func (r Rule) Validate() error {
-	p, err := netip.ParsePrefix(strings.TrimSpace(r.CIDR))
-	if err != nil {
-		return fmt.Errorf("rule cidr %q: %w", r.CIDR, err)
-	}
-	if !p.Addr().Is4() {
+	p, err := netip.ParsePrefix(r.CIDR)
+	if err != nil || !p.Addr().Is4() {
 		// The VPN pool is IPv4; an IPv6 rule would enforce nothing.
-		return fmt.Errorf("rule cidr %q: only IPv4 is supported", r.CIDR)
+		return fmt.Errorf("rule cidr %q: want an IPv4 CIDR such as 10.0.0.0/24", r.CIDR)
 	}
 	switch r.Proto {
 	case ProtoTCP, ProtoUDP:
@@ -184,7 +174,7 @@ func Routes(rules []Rule) []string {
 	seen := map[netip.Prefix]bool{}
 	var out []string
 	for _, r := range rules {
-		p, err := netip.ParsePrefix(strings.TrimSpace(r.CIDR))
+		p, err := netip.ParsePrefix(r.CIDR)
 		if err != nil {
 			continue
 		}

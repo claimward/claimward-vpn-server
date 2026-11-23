@@ -102,6 +102,17 @@ func TestEnrollmentIsRefusedWhenTheFirewallCannotBeInstalled(t *testing.T) {
 	}
 }
 
+func TestNoFirewallIsNoSync(t *testing.T) {
+	s, _ := newServer(t)
+	if err := s.syncFirewall(); err != nil {
+		t.Fatal(err)
+	}
+	s.UseFirewall(func() error { return errors.New("x") })
+	if err := s.syncFirewall(); err == nil {
+		t.Fatal("the failure was hidden")
+	}
+}
+
 // A tenant's policy changing re-installs the table.
 func TestPolicyChangeReinstalls(t *testing.T) {
 	s, _, ts, rec := firewallServer(t)

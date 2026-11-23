@@ -72,6 +72,69 @@ func TestPortRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPortParsingAndFormatting(t *testing.T) {
+	for in, want := range map[string]Port{
+		`445`:                {445, 445},
+		`"445"`:              {445, 445},
+		`"8000-8100"`:        {8000, 8100},
+		`"7-7"`:              {7, 7},
+		`65535`:              {65535, 65535},
+		`"0000000000000445"`: {445, 445}, // 16 bytes: the limit
+	} {
+		var p Port
+		if err := p.UnmarshalJSON([]byte(in)); err != nil || p != want {
+			t.Errorf("%s -> %v, %v; want %v", in, p, err, want)
+		}
+	}
+	for _, in := range []string{
+		`"abc"`, `abc`, `""`, `"-"`, `"1-"`, `"-1"`, `"9-1"`, `"1-x"`, `"x-1"`, `0`, `"0-5"`, `65536`,
+		`"00000000000000445"`, // 17 bytes
+		`"`,                   // not even JSON
+	} {
+		var p Port
+		if err := p.UnmarshalJSON([]byte(in)); err == nil {
+			t.Errorf("%s accepted as %v", in, p)
+		}
+	}
+	// What is written is what is read, in its shortest form.
+	for p, want := range map[Port][2]string{
+		{445, 445}:   {"445", "445"},
+		{8000, 8100}: {"8000-8100", `"8000-8100"`},
+	} {
+		b, err := p.MarshalJSON()
+		if p.String() != want[0] || string(b) != want[1] || err != nil {
+			t.Errorf("%v: String %q JSON %s", p, p.String(), b)
+		}
+	}
+}
+
+func TestValidateRefusesWhatParseWouldNotBuild(t *testing.T) {
+	for name, r := range map[string]Rule{
+		"port 0":     {CIDR: "10.0.0.1/32", Proto: "tcp", Ports: []Port{{0, 5}}},
+		"backwards":  {CIDR: "10.0.0.1/32", Proto: "tcp", Ports: []Port{{9, 1}}},
+		"space cidr": {CIDR: " 10.0.0.1/32", Proto: "tcp", Ports: []Port{{1, 1}}},
+		"bad cidr":   {CIDR: "10.0.0.1", Proto: "tcp", Ports: []Port{{1, 1}}},
+		"ipv6":       {CIDR: "::1/128", Proto: "udp", Ports: []Port{{1, 1}}},
+	} {
+		if err := r.Validate(); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if err := (Rule{CIDR: "10.0.0.1/32", Proto: "tcp", Ports: []Port{{1, 1}}}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseRefusesAnOversizedPolicy(t *testing.T) {
+	big := "[" + strings.Repeat(" ", maxPolicyBytes) + "]"
+	if _, err := Parse([]byte(big)); err == nil {
+		t.Fatal("a policy over the size limit was parsed")
+	}
+	if _, err := Parse([]byte("[ ]")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLegacyAndRoutes(t *testing.T) {
 	l := Legacy([]string{"10.1.0.0/16", "10.1.5.0/16", "bogus"})
 	if got, want := Routes(l), []string{"10.1.0.0/16"}; !reflect.DeepEqual(got, want) {

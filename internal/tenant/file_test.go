@@ -2,7 +2,10 @@ package tenant
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/claimward/claimward-vpn-server/internal/policy"
 )
 
 const file = `[
@@ -59,6 +62,65 @@ func TestParseFileRefuses(t *testing.T) {
 		if _, err := ParseFile([]byte(in)); err == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+}
+
+func TestParseFileBounds(t *testing.T) {
+	if _, err := ParseFile([]byte("[" + strings.Repeat(" ", maxFileBytes) + "]")); err == nil {
+		t.Error("a file over the size limit was parsed")
+	}
+	many := "[" + strings.Repeat(`{"id":"a"},`, maxFileTenants) + `{"id":"a"}]`
+	if _, err := ParseFile([]byte(many)); err == nil {
+		t.Error("a file over the tenant limit was parsed")
+	}
+	if ts, err := ParseFile([]byte(`[{"id":"a"}]`)); err != nil || len(ts) != 1 {
+		t.Errorf("%v %v", ts, err)
+	}
+}
+
+func TestRulesAreThePolicyWhenThereIsOne(t *testing.T) {
+	ts, _ := ParseFile([]byte(file))
+	if got := ts[0].Rules(); !reflect.DeepEqual(got, ts[0].Policy) || got[0].Proto != "tcp" {
+		t.Fatalf("rules = %+v", got)
+	}
+	if got := (Tenant{}).Rules(); len(got) != 0 {
+		t.Fatalf("a tenant with neither reaches %+v", got)
+	}
+}
+
+func TestSeed(t *testing.T) {
+	s := New([]string{"10.0.0.0/8"}, []string{"10.0.0.53"})
+	ts, _ := ParseFile([]byte(file))
+	// Replacing the default tenant keeps its identity and bumps the serial.
+	if err := s.Seed(ts[0]); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := s.Get(DefaultID)
+	if d.Serial != 2 || len(d.Policy) != 2 || d.DNS != nil {
+		t.Fatalf("default = %+v", d)
+	}
+	// A new tenant starts at serial 1; its ID can come from its name.
+	if err := s.Seed(Tenant{Name: "Chimie Fine"}); err != nil {
+		t.Fatal(err)
+	}
+	if c, ok := s.Get("chimie-fine"); !ok || c.Serial != 1 {
+		t.Fatalf("seeded = %+v %v", c, ok)
+	}
+	if err := s.Seed(Tenant{}); err == nil {
+		t.Error("a tenant with no id or name was seeded")
+	}
+	bad := Tenant{ID: "bad", Policy: []policy.Rule{{CIDR: "10.0.0.1/32", Proto: "tcp"}}}
+	if err := s.Seed(bad); err == nil {
+		t.Error("an invalid policy was seeded")
+	}
+	if _, ok := s.Get("bad"); ok {
+		t.Error("an invalid tenant was stored")
+	}
+	if _, err := s.Create(bad); err == nil {
+		t.Error("an invalid policy was created")
+	}
+	if _, err := s.Update(DefaultID, bad); err == nil {
+		t.Error("an invalid policy was updated")
 	}
 }
 
