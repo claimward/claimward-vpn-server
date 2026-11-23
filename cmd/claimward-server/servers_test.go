@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -117,4 +118,48 @@ func TestTheEnrollmentMuxDoesNotServeMetrics(t *testing.T) {
 		}
 		return true
 	})
+}
+
+// A metrics address that cannot be bound stops the server, rather than
+// leaving it running with no metrics (or with them somewhere else).
+func TestRunRefusesAMetricsAddressItCannotBind(t *testing.T) {
+	runEnv(t)
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taken.Close()
+	t.Setenv("METRICS_ADDR", taken.Addr().String())
+	stop := time.AfterFunc(5*time.Second, func() {
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = p.Signal(os.Interrupt)
+		}
+	})
+	defer stop.Stop()
+	if err := run(quiet); err == nil {
+		t.Fatal("run went on with its metrics address taken")
+	}
+}
+
+func TestServeLimitedRefusesAnAddressItCannotBind(t *testing.T) {
+	if err := serveLimited(newHTTPServer("256.0.0.1:1", http.NotFoundHandler()), "", ""); err == nil {
+		t.Error("serveLimited bound a bad address")
+	}
+}
+
+// With a certificate it serves TLS (and refuses an unreadable one); without
+// it, plain HTTP.
+func TestServeLimitedUsesTLSOnlyWithACertificate(t *testing.T) {
+	s := newHTTPServer("127.0.0.1:0", http.NotFoundHandler())
+	done := make(chan error, 1)
+	go func() { done <- serveLimited(s, "/nonexistent.crt", "/nonexistent.key") }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("an unreadable certificate was accepted")
+		}
+	case <-time.After(3 * time.Second):
+		s.Close()
+		t.Fatal("serveLimited served plain HTTP although a certificate was configured")
+	}
 }
