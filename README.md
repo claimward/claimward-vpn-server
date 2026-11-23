@@ -218,6 +218,7 @@ not be skipped there.
 | `DNS` | | — | CSV DNS servers of the `default` tenant |
 | `KEEPALIVE` | | `25` | persistent keepalive (seconds) |
 | `LEASE_TTL` | | `24h` | lease duration without heartbeat |
+| `MAX_DEVICES_PER_SUBJECT` | | `5` | most devices one account may have enrolled at once (a further new key gets 429 `too_many_devices`) |
 | `LISTEN_ADDR` | | `:8443` | HTTP control-plane listen address |
 | `GRPC_ADDR` | | `:8444` | RouteService gRPC listen address |
 | `GRPC_ENDPOINT` | | — | `host:port` advertised to clients for route streaming |
