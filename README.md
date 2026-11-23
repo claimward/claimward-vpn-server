@@ -133,6 +133,66 @@ A person who matches none belongs to the `default` tenant, and only then.
 
 The admin API and WebUI edit the three membership lists beside the routes.
 
+## Access policy: what a peer may reach is enforced here
+
+Pushing routes to a client is advice: a modified client can send anywhere.
+So each tenant has a **policy**, and the gateway **enforces** it with nftables
+(from Go, over netlink; nothing shells out to `nft`).
+
+A policy is a list of allow rules, `{cidr, proto, ports}`, `proto` being `tcp` or
+`udp` and `ports` numbers or `"lo-hi"` ranges. Mésocentre file access, where a
+peer reaches only the file server on tcp/445 (SMB) and tcp+udp/88 (Kerberos):
+
+```json
+[
+  {
+    "id": "default",
+    "policy": [
+      {"cidr": "10.20.0.5/32", "proto": "tcp", "ports": [445, 88]},
+      {"cidr": "10.20.0.5/32", "proto": "udp", "ports": [88]}
+    ]
+  }
+]
+```
+
+Load it with `TENANTS_FILE=/etc/claimward/tenants.json` (a JSON array of
+tenants, with the same fields as the admin API: `id`, `name`, `domains`,
+`groups`, `idps`, `dns`, `policy`), or `POST`/`PUT` a tenant with a `policy`
+to the admin API. A tenant file's `default` entry replaces `PUSH_ROUTES`.
+
+- **One source of truth.** The `AllowedIPs` pushed to clients are the distinct
+  destination CIDRs of the policy (`allowed_ips` is overwritten when a policy is
+  set), so what a client is told and what the gateway lets through cannot drift.
+- **Default deny** on traffic arriving on `WG_INTERFACE`: in the `forward` hook
+  (to the networks behind the gateway) **and** the `input` hook (to the gateway
+  host itself, which may be the file server). Only IPv4 is allowed; whatever a
+  tenant's rules do not name is dropped. Traffic that does not arrive on the
+  wg interface is never touched.
+- **One table, `inet claimward`**, replaced atomically in a single netlink
+  transaction at start and after every change of peers or tenants. A peer's
+  `/32` is in the set of the tenant it enrolled into; a peer whose tenant is
+  deleted is in no set and is dropped.
+- **Fail closed.** At start, if the ruleset cannot be installed (not Linux, no
+  `CAP_NET_ADMIN`, no nf_tables) the server does not start. An enrollment whose
+  ruleset cannot be installed is refused and the peer removed. If a later
+  update fails, deny-all is installed. The table is left in place when the
+  process exits, so a dead gateway keeps denying. Use `WG_DRYRUN=true` for
+  development: the ruleset is only logged.
+- **Tenants without a policy** (the pre-0.3 `allowed_ips`/`PUSH_ROUTES` form)
+  keep their meaning: every protocol and port to those CIDRs, now enforced.
+  A tenant with neither reaches nothing.
+- **DNS is not implicit.** A pushed DNS server is reachable only if the policy
+  names it (udp and tcp `53`).
+- The policy is parsed strictly (unknown fields, IPv6, `any`, empty ports and
+  more than 1024 rules or 64 ports per rule are refused) and the parsers are
+  fuzzed.
+
+The Linux integration test (`internal/fw`, `TestNetnsPolicyIsEnforced`) builds
+a peer, a gateway and a file server in network namespaces and checks every
+allowed and denied flow. It needs root: it is skipped, with the reason printed,
+elsewhere, and the privileged CI lane sets `CW_REQUIRE_NETNS=1` so that it can
+not be skipped there.
+
 ## Configuration (environment)
 
 | Var | Required | Default | Notes |
@@ -154,6 +214,7 @@ The admin API and WebUI edit the three membership lists beside the routes.
 | `WG_DRYRUN` | | `false` | log peer ops instead of applying — local dev |
 | `VPN_CIDR` | | `10.80.0.0/24` | address pool; `.1` is the gateway |
 | `PUSH_ROUTES` | | `VPN_CIDR` | CSV AllowedIPs of the `default` tenant |
+| `TENANTS_FILE` | | — | JSON file of tenants and their access policies (see *Access policy*) |
 | `DNS` | | — | CSV DNS servers of the `default` tenant |
 | `KEEPALIVE` | | `25` | persistent keepalive (seconds) |
 | `LEASE_TTL` | | `24h` | lease duration without heartbeat |

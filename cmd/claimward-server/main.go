@@ -41,6 +41,7 @@ import (
 	"github.com/claimward/claimward-vpn-server/internal/api"
 	"github.com/claimward/claimward-vpn-server/internal/auth"
 	"github.com/claimward/claimward-vpn-server/internal/config"
+	"github.com/claimward/claimward-vpn-server/internal/fw"
 	"github.com/claimward/claimward-vpn-server/internal/grpcsrv"
 	"github.com/claimward/claimward-vpn-server/internal/ipam"
 	"github.com/claimward/claimward-vpn-server/internal/metrics"
@@ -120,8 +121,43 @@ func run(log *slog.Logger) error {
 
 	st := store.New()
 	ts := tenant.New(cfg.PushRoutes, cfg.DNS)
+	if cfg.TenantsFile != "" {
+		data, err := os.ReadFile(cfg.TenantsFile)
+		if err != nil {
+			return fmt.Errorf("read TENANTS_FILE: %w", err)
+		}
+		tenants, err := tenant.ParseFile(data)
+		if err != nil {
+			return err
+		}
+		for _, t := range tenants {
+			if err := ts.Seed(t); err != nil {
+				return err
+			}
+		}
+		log.Info("tenants loaded", "file", cfg.TenantsFile, "tenants", len(tenants))
+	}
+
+	// ⛔ Fail closed: what each peer may reach is ENFORCED here, by the
+	// kernel's nftables, before any peer can be enrolled. If the ruleset
+	// cannot be installed the server does not start.
+	var applier fw.Applier = fw.NewNFT()
+	if cfg.DryRun {
+		applier = fw.Discard{Log: log}
+	}
+	fwm := fw.NewManager(cfg.WGInterface, applier, fw.FromStores(ts, st), log)
+	if err := fwm.Sync(); err != nil {
+		return fmt.Errorf("install the gateway firewall (needs Linux and CAP_NET_ADMIN; WG_DRYRUN=true for development): %w", err)
+	}
+	ts.SetOnChange(func() {
+		if err := fwm.Sync(); err != nil {
+			log.Error("firewall sync after a tenant change failed; deny-all installed", "err", err)
+		}
+	})
+
 	m := metrics.New(st, ts)
 	srv := api.New(cfg, verifier, alloc, st, gw, ts, m, serverPub, log)
+	srv.UseFirewall(fwm.Sync)
 
 	// go-authn: a device's key must be one its owner registered with the
 	// provider, and a key the provider takes back is dropped here.

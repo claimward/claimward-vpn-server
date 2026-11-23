@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("[{\"id\":\"default\",\"policy\":[{\"cidr\":\"10.20.0.5/32\",\"proto\":\"tcp\",\"ports\":[445,88]},{\"cidr\":\"10.20.0.5/32\",\"proto\":\"udp\",\"ports\":[88]}]},{\"id\":\"chem\",\"groups\":[\"chem\"],\"allowed_ips\":[\"10.1.0.0/16\"]}]")
