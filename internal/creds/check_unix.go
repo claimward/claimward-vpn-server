@@ -40,10 +40,9 @@ func inProcessGroup(gid int) bool {
 	if gid == getegid() {
 		return true
 	}
-	groups, err := getgroups()
-	if err != nil {
-		return false
-	}
+	// On error getgroups returns no groups, so nothing matches and the file is
+	// refused: failing closed needs no branch of its own.
+	groups, _ := getgroups()
 	for _, g := range groups {
 		if g == gid {
 			return true
