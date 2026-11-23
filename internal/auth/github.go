@@ -35,6 +35,12 @@ func NewGitHubVerifier(apiURL string, allowedOrgs []string) *GitHubVerifier {
 }
 
 func (v *GitHubVerifier) Verify(ctx context.Context, token string) (*Claims, error) {
+	// ⛔ Fail closed: with no allowlist every GitHub account would be admitted,
+	// an open relay. Config.Load refuses this too; here it holds for any
+	// caller that builds a verifier by hand.
+	if !v.hasAllowedOrg() {
+		return nil, fmt.Errorf("github authentication needs an organisation allowlist (GITHUB_ALLOWED_ORGS)")
+	}
 	var user struct {
 		ID    int64  `json:"id"`
 		Login string `json:"login"`
@@ -66,16 +72,25 @@ func (v *GitHubVerifier) Verify(ctx context.Context, token string) (*Claims, err
 		claims.Groups = append(claims.Groups, o.Login)
 	}
 
-	if len(v.allowedOrgs) > 0 {
-		ok, err := v.inAllowedOrg(ctx, token, user.Login)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("user %q is not a member of an allowed org", user.Login)
-		}
+	ok, err := v.inAllowedOrg(ctx, token, user.Login)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("user %q is not a member of an allowed org", user.Login)
 	}
 	return claims, nil
+}
+
+// hasAllowedOrg is whether the allowlist names at least one organisation (a
+// list of blanks names none).
+func (v *GitHubVerifier) hasAllowedOrg() bool {
+	for _, o := range v.allowedOrgs {
+		if strings.TrimSpace(o) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // inAllowedOrg reports whether the user is an active member of any allowed org,

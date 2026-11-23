@@ -41,8 +41,8 @@ tasks:
           export WG_DRYRUN=true
           export LISTEN_ADDR="${LISTEN_ADDR:-:8080}"
           export AUTH_PROVIDER="${AUTH_PROVIDER:-github}"
-          # dev only: a dry-run server with no real network may admit any account
-          export GITHUB_ALLOW_ANY_ACCOUNT="${GITHUB_ALLOW_ANY_ACCOUNT:-true}"
+          # the github provider requires an org allowlist (no opt-out)
+          export GITHUB_ALLOWED_ORGS="${GITHUB_ALLOWED_ORGS:-claimward}"
           export WG_ENDPOINT="${WG_ENDPOINT:-vpn.local:51820}"
           export WG_PRIVATE_KEY="${WG_PRIVATE_KEY:-$(openssl rand -base64 32)}"
           echo "dry-run server on $LISTEN_ADDR (auth=$AUTH_PROVIDER, endpoint=$WG_ENDPOINT)"
