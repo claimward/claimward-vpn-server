@@ -204,3 +204,31 @@ func FuzzNewPlan(f *testing.F) {
 		}
 	})
 }
+
+// A TCP or UDP accept must hold exactly one port range: none or two is an
+// error, and must be one without indexing the empty slice (a panic here ends
+// the test binary and hides every test after it).
+func TestSpecOfAcceptPortCount(t *testing.T) {
+	dst := netip.MustParsePrefix("192.168.1.0/24")
+	for _, proto := range []string{policy.ProtoTCP, policy.ProtoUDP} {
+		for n := 0; n <= 3; n++ {
+			ports := make([]policy.Port, n)
+			for i := range ports {
+				ports[i] = policy.Port{Lo: uint16(80 + i), Hi: uint16(80 + i)}
+			}
+			s, err := specOfAccept(fw.Rule{Final: fw.Accept, Dst: dst, Proto: proto, Ports: ports}, "wg0", "t0")
+			if n != 1 {
+				if err == nil || !strings.Contains(err.Error(), "exactly one port range") {
+					t.Errorf("%s with %d port ranges: err = %v, want the exactly-one refusal", proto, n, err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatalf("%s with one range: %v", proto, err)
+			}
+			if s.PortLo != 80 || s.PortHi != 80 {
+				t.Errorf("%s: ports %d-%d, want 80-80", proto, s.PortLo, s.PortHi)
+			}
+		}
+	}
+}
