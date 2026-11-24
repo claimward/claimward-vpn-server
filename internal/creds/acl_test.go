@@ -89,7 +89,7 @@ func TestJudgeACL(t *testing.T) {
 		{"torn entry", append(aclBytes(2, systemdACL(uid)...), 1, 2, 3), "malformed"},
 		{"oversized", append(aclBytes(2, systemdACL(uid)...), make([]byte, MaxACLSize)...), "over the"},
 	} {
-		got := judgeACL(c.acl, uid)
+		got := safeJudge(c.acl, uid)
 		if c.want == "" {
 			if got != "" {
 				t.Errorf("%s: refused: %s", c.name, got)
@@ -149,4 +149,14 @@ func TestJudgeACLNeverPanicsOnMalformedInput(t *testing.T) {
 			}
 		}()
 	}
+}
+
+// safeJudge turns a panic into a reason, so a table row fails by assertion.
+func safeJudge(acl []byte, uid uint32) (got string) {
+	defer func() {
+		if r := recover(); r != nil {
+			got = "PANIC"
+		}
+	}()
+	return judgeACL(acl, uid)
 }

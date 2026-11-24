@@ -32,15 +32,19 @@ func TestACLRescue(t *testing.T) {
 		{"mode 0444", &syscall.Stat_t{Uid: 0, Mode: 0o100444}, good, false, ""},
 	}
 	for _, c := range cases {
-		why, ok := aclRescue("base", c.st, c.read)
-		if ok != c.ok {
-			t.Errorf("%s: accepted = %v, want %v", c.name, ok, c.ok)
+		err := aclRescue("/p", "n", "base", c.st, c.read)
+		if (err == nil) != c.ok {
+			t.Errorf("%s: accepted = %v (%v), want %v", c.name, err == nil, err, c.ok)
+			continue
 		}
-		if c.suffix == "" && why != "base" {
-			t.Errorf("%s: reason changed to %q", c.name, why)
+		if err == nil {
+			continue
 		}
-		if c.suffix != "" && !strings.HasPrefix(why, "base"+c.suffix) {
-			t.Errorf("%s: reason = %q", c.name, why)
+		if !strings.Contains(err.Error(), "base") {
+			t.Errorf("%s: reason lost: %v", c.name, err)
+		}
+		if has := strings.Contains(err.Error(), "; and it "); has != (c.suffix != "") {
+			t.Errorf("%s: ACL reason present = %v: %v", c.name, has, err)
 		}
 	}
 }
