@@ -191,6 +191,8 @@ jobs:
       - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go build ./...
       - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go test -c -o wg.test ./internal/wg
       - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go test -c -o pf.test ./internal/pf
+      - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go build -o claimward-server ./cmd/claimward-server
+      - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go test -c -o rcproof.test ./deploy/openbsd/rcproof
       - uses: vmactions/openbsd-vm@v1
         with:
           release: ${{ matrix.release }}
@@ -199,6 +201,10 @@ jobs:
             set -e
             uname -a
             id -u
+            # The rc.d deployment (deploy/openbsd): install, rcctl start, the
+            # startup line, rcctl check, rcctl stop, and the start that must
+            # fail when pf.conf lacks the anchor.
+            CW_REQUIRE_OPENBSD=1 CW_SERVER_BIN="$PWD/claimward-server" CW_DEPLOY_DIR="$PWD/deploy/openbsd" ./rcproof.test -test.v -test.count=1
             CW_REQUIRE_OPENBSD=1 ./wg.test -test.v -test.count=1 -test.run 'TestIfreqMTUSize|TestSetInterfaceMTUOnARealLink'
             # The pf applier against the real kernel: struct layout vs the
             # release's own header, ioctl load + read-back, pfctl as oracle.

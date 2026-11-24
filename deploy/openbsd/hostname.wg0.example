@@ -1,0 +1,11 @@
+# /etc/hostname.wg0 (hostname.if(5)). The server only manages PEERS: the
+# interface, its key and its address must already exist when it starts.
+# wgkey is the SAME key as the wg-private-key credential (the server derives
+# the public key it hands out from the credential). The file holds a secret:
+#   install -m 0640 -o root -g wheel hostname.wg0.example /etc/hostname.wg0
+# then edit it, and bring the interface up with: sh /etc/netstart wg0
+# The address is the first host of VPN_CIDR.
+wgkey REPLACE_WITH_THE_BASE64_PRIVATE_KEY
+wgport 51820
+inet 10.80.0.1 255.255.255.0
+up

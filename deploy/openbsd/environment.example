@@ -1,0 +1,11 @@
+# /etc/claimward/environment: NON-secret settings, read by the rc.d script as
+# sh assignments. Secrets are files in /etc/claimward/credentials, never here.
+# Install: install -m 0600 -o root -g wheel environment.example /etc/claimward/environment
+WG_ENDPOINT=vpn.example.org:51820
+AUTH_PROVIDER=github
+GITHUB_ALLOWED_ORGS=example-org
+WG_INTERFACE=wg0
+VPN_CIDR=10.80.0.0/24
+# /metrics is OFF unless this is set; it names every tenant: keep it on loopback.
+#METRICS_ADDR=127.0.0.1:9100
+#TENANTS_FILE=/etc/claimward/tenants.json

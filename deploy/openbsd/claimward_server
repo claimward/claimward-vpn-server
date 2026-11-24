@@ -1,0 +1,50 @@
+#!/bin/ksh
+#
+# rc.d(8) script for claimward-server on OpenBSD 7.9 / 8.0.
+# Install: install -m 0555 claimward_server /etc/rc.d/claimward_server
+#          rcctl enable claimward_server && rcctl start claimward_server
+#
+# It runs as ROOT, on purpose. Both kernel interfaces the server drives refuse
+# anyone else: wg(4) peer configuration is behind suser(9) (sys/net/if_wg.c,
+# wg_ioctl_set: `if ((ret = suser(curproc)) != 0) return ret;`), and /dev/pf
+# is guarded only by its device node (pfopen in sys/net/pf_ioctl.c checks the
+# minor number and nothing else), which MAKEDEV creates root-only. There is no
+# privileged group to give a _claimward user, and no pledge(2) or unveil(2) to
+# narrow root with (see the server README). The deploy/README.md section
+# "OpenBSD" has the details.
+#
+# Secrets are files in /etc/claimward/credentials (CREDENTIALS_DIRECTORY),
+# never the environment. /etc/claimward/environment holds only the non-secret
+# settings, as sh assignments.
+
+daemon="/usr/local/bin/claimward-server"
+daemon_user="root"
+# The server logs to stderr: rc.subr pipes it to syslog (daemon.info).
+daemon_logger="daemon.info"
+rc_bg=YES
+
+. /etc/rc.d/rc.subr
+
+rc_reload=NO
+
+rc_configtest() {
+	[ -r /etc/claimward/environment ] || {
+		echo "/etc/claimward/environment is missing" >&2
+		return 1
+	}
+	[ -d /etc/claimward/credentials ] || {
+		echo "/etc/claimward/credentials is missing" >&2
+		return 1
+	}
+}
+
+rc_pre() {
+	rc_configtest || return 1
+	set -a
+	. /etc/claimward/environment
+	set +a
+	CREDENTIALS_DIRECTORY=/etc/claimward/credentials
+	export CREDENTIALS_DIRECTORY
+}
+
+rc_cmd $1

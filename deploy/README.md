@@ -25,6 +25,7 @@ commented line.
 | Docker Compose / Swarm | `/run/secrets` (set `CREDENTIALS_DIRECTORY` by hand) | Swarm: `mode: 0400`; plain Compose: chown/chmod the host file | [`compose/compose.yaml`](compose/compose.yaml) |
 | Podman (Quadlet) | `/run/secrets` (set by hand) | `Secret=...,mode=0400,uid=...` | [`podman/claimward-server.container`](podman/claimward-server.container) |
 | Kubernetes | the Secret volume's mount path (set by hand) | `defaultMode: 0440` + `fsGroup`: files are root:fsGroup `0440`, accepted; the pod runs as uid/gid 65532 with only `NET_ADMIN`, which needs `setcap cap_net_admin=+ep` on the image binary (see below) | [`kubernetes/claimward-server.yaml`](kubernetes/claimward-server.yaml) |
+| OpenBSD (rc.d, pf) | `/etc/claimward/credentials` (the rc.d script sets `CREDENTIALS_DIRECTORY`) | owned by root, `0400`, in a `0700` directory (`install(1)`) | [`openbsd/claimward_server`](openbsd/claimward_server) |
 
 The container image is `ghcr.io/claimward/claimward-vpn-server:<tag>`, built
 from the [`Dockerfile`](../Dockerfile) on every tag for amd64 and arm64
@@ -92,6 +93,53 @@ the file capability grants nothing beyond what `add` already put in the
 permitted set. This is the kernel's documented behaviour (capabilities(7)); it
 was not run on a cluster here. Without the `setcap`, the first netlink call
 fails with `EPERM`; the fallback is uid 0 with `defaultMode: 0400`.
+
+## OpenBSD (7.9 and 8.0)
+
+Files: [`openbsd/`](openbsd/): `claimward_server` (rc.d), `environment.example`,
+`hostname.wg0.example`, `pf.conf.example`.
+
+**It runs as root, and there is no way around that.** wg(4) peer configuration
+is behind `suser(9)` (`sys/net/if_wg.c`, `wg_ioctl_set`:
+`if ((ret = suser(curproc)) != 0) return ret;`), and `/dev/pf` is guarded only
+by its device node: `pfopen` in `sys/net/pf_ioctl.c` checks the minor number and
+nothing else, so the node's root-only mode is the whole access control. OpenBSD
+has no capability or privileged-group mechanism that would let a `_claimward`
+user do either, and the server has no `pledge(2)`/`unveil(2)` to narrow root
+(see the README). So `daemon_user="root"`, the credential files belong to root
+(`0400`, the process's own file), and the directory is `0700`.
+
+```sh
+# the server binary (from a release, or built with GOOS=openbsd)
+install -m 0555 claimward-server /usr/local/bin/claimward-server
+
+# directories and secrets: root-owned, files 0400
+install -d -m 0755 -o root -g wheel /etc/claimward
+install -d -m 0700 -o root -g wheel /etc/claimward/credentials
+install -m 0400 -o root -g wheel /path/to/wg-private-key /etc/claimward/credentials/wg-private-key
+# optional: admin-token, github-token, goauthn-gateway-secret (same install line)
+
+# non-secret settings, then edit
+install -m 0600 -o root -g wheel openbsd/environment.example /etc/claimward/environment
+
+# wg0 (same key as the credential; the file holds a secret): edit, then bring it up
+install -m 0640 -o root -g wheel openbsd/hostname.wg0.example /etc/hostname.wg0
+sh /etc/netstart wg0
+
+# pf: add the lines of openbsd/pf.conf.example to /etc/pf.conf, then
+pfctl -f /etc/pf.conf && pfctl -e
+
+install -m 0555 openbsd/claimward_server /etc/rc.d/claimward_server
+rcctl enable claimward_server
+rcctl start claimward_server && rcctl check claimward_server
+```
+
+The server logs to syslog (`daemon.info`, `/var/log/daemon`). It refuses to start
+without `anchor "claimward"` in the main ruleset, with `set skip on` covering
+`wg0`, and on any release but 7.9 and 8.0. The `openbsd` CI lane installs this
+very script in real 7.9 and 8.0 VMs, runs `rcctl start`, checks the startup line
+and `rcctl check`, runs `rcctl stop`, and then removes the anchor from `pf.conf`
+and asserts that the start fails.
 
 ## Hosts without systemd
 

@@ -250,6 +250,10 @@ fail closed.
 - **Refusals at start:** not root (`/dev/pf` is opened read-write), pf disabled,
   the main ruleset does not call `anchor "claimward"` (the policy would filter
   nothing), `set skip on` covering the WireGuard interface (`wg0`, `wg*`).
+- **Deployment.** [`deploy/openbsd/`](deploy/openbsd/) ships an `rc.d` script,
+  a `pf.conf` fragment, a `hostname.wg0` and the credentials layout
+  ([deploy/README.md](deploy/README.md#openbsd-79-and-80)). The server runs as
+  root: wg(4) peer configuration needs `suser(9)` and `/dev/pf` is root-only.
 - **Table names** carry a per-load generation suffix, so the short window between
   the table commit and the rule commit never applies one tenant's rules to
   another tenant's peers.
