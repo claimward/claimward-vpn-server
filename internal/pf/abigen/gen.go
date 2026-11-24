@@ -47,7 +47,7 @@ func main() {
 	// The argument is a directory, not a file: `go run gen.go x.go` would
 	// take x.go for a second source file.
 	dest := filepath.Join(os.Args[1], "ztypes_openbsd_"+runtime.GOARCH+".go")
-	if err := os.WriteFile(dest, append(src, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(dest, src, 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

@@ -156,4 +156,3 @@ type PfStatus struct {
 	Pf_chksum           [16]uint8
 	Pad_cgo_0           [4]byte
 }
-

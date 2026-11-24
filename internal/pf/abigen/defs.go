@@ -113,31 +113,31 @@ const (
 )
 
 const (
-	OffRuleSrc         = C.OffRuleSrc
-	OffRuleDst         = C.OffRuleDst
-	OffRuleSkip        = C.OffRuleSkip
-	OffRuleIfname      = C.OffRuleIfname
-	OffRuleRcvIfname   = C.OffRuleRcvIfname
-	OffRuleRtableid    = C.OffRuleRtableid
-	OffRuleOnrdomain   = C.OffRuleOnrdomain
-	OffRuleNr          = C.OffRuleNr
-	OffRuleCuid        = C.OffRuleCuid
-	OffRuleCpid        = C.OffRuleCpid
-	OffRuleMaxMSS      = C.OffRuleMaxMSS
-	OffRuleScrubFlags  = C.OffRuleScrubFlags
-	OffRuleAction      = C.OffRuleAction
-	OffRuleDirection   = C.OffRuleDirection
-	OffRuleQuick       = C.OffRuleQuick
-	OffRuleKeepState   = C.OffRuleKeepState
-	OffRuleAf          = C.OffRuleAf
-	OffRuleProto       = C.OffRuleProto
-	OffRuleFlags       = C.OffRuleFlags
-	OffRuleFlagset     = C.OffRuleFlagset
-	OffRuleTimeout     = C.OffRuleTimeout
-	OffRuleExptime     = C.OffRuleExptime
-	OffRuleEvaluations = C.OffRuleEvaluations
-	OffRulePktrate     = C.OffRulePktrate
-	OffRuleEntries     = C.OffRuleEntries
+	OffRuleSrc            = C.OffRuleSrc
+	OffRuleDst            = C.OffRuleDst
+	OffRuleSkip           = C.OffRuleSkip
+	OffRuleIfname         = C.OffRuleIfname
+	OffRuleRcvIfname      = C.OffRuleRcvIfname
+	OffRuleRtableid       = C.OffRuleRtableid
+	OffRuleOnrdomain      = C.OffRuleOnrdomain
+	OffRuleNr             = C.OffRuleNr
+	OffRuleCuid           = C.OffRuleCuid
+	OffRuleCpid           = C.OffRuleCpid
+	OffRuleMaxMSS         = C.OffRuleMaxMSS
+	OffRuleScrubFlags     = C.OffRuleScrubFlags
+	OffRuleAction         = C.OffRuleAction
+	OffRuleDirection      = C.OffRuleDirection
+	OffRuleQuick          = C.OffRuleQuick
+	OffRuleKeepState      = C.OffRuleKeepState
+	OffRuleAf             = C.OffRuleAf
+	OffRuleProto          = C.OffRuleProto
+	OffRuleFlags          = C.OffRuleFlags
+	OffRuleFlagset        = C.OffRuleFlagset
+	OffRuleTimeout        = C.OffRuleTimeout
+	OffRuleExptime        = C.OffRuleExptime
+	OffRuleEvaluations    = C.OffRuleEvaluations
+	OffRulePktrate        = C.OffRulePktrate
+	OffRuleEntries        = C.OffRuleEntries
 	OffRulePrio           = C.OffRulePrio
 	OffRuleSetPrio        = C.OffRuleSetPrio
 	OffRuleNaf            = C.OffRuleNaf
@@ -146,12 +146,12 @@ const (
 	OffRuleAnchorRelative = C.OffRuleAnchorRelative
 	OffRuleAnchorWildcard = C.OffRuleAnchorWildcard
 	OffRuleFlush          = C.OffRuleFlush
-	OffIocAction       = C.OffIocAction
-	OffIocTicket       = C.OffIocTicket
-	OffIocNr           = C.OffIocNr
-	OffIocAnchor       = C.OffIocAnchor
-	OffIocCall         = C.OffIocCall
-	OffIocRule         = C.OffIocRule
+	OffIocAction          = C.OffIocAction
+	OffIocTicket          = C.OffIocTicket
+	OffIocNr              = C.OffIocNr
+	OffIocAnchor          = C.OffIocAnchor
+	OffIocCall            = C.OffIocCall
+	OffIocRule            = C.OffIocRule
 )
 
 type PfAddr C.struct_pf_addr
