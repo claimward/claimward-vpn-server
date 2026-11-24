@@ -199,6 +199,36 @@ jobs:
         env:
           CW_REQUIRE_OPENBSD: '1'
 
+  # The pf structures are generated from each release's own <net/pfvar.h> by
+  # cgo -godefs ON the VM. The committed ztypes file must be byte-identical to
+  # what BOTH supported releases generate (7.9 and 8.0 share one layout): a
+  # release that drifts fails here before the gateway can mis-encode a rule.
+  pfabi:
+    name: pf ABI ${{ matrix.release }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ['7.9', '8.0']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: vmactions/openbsd-vm@v1
+        with:
+          release: ${{ matrix.release }}
+          prepare: pkg_add go
+          run: |
+            uname -a
+            go version
+            mkdir -p internal/pf/gen
+            cd internal/pf/abigen
+            GOTOOLCHAIN=local go run gen.go ../gen/ztypes_openbsd_amd64.go
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ztypes-${{ matrix.release }}
+          path: internal/pf/gen/
+      - run: diff -u internal/pf/ztypes_openbsd_amd64.go internal/pf/gen/ztypes_openbsd_amd64.go
+
   crossbuild:
     name: cross-build (${{ matrix.goarch }})
     runs-on: ubuntu-latest
