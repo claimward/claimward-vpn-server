@@ -220,7 +220,7 @@ jobs:
       - name: the service runs with CAP_NET_ADMIN alone, as its user, with no secret in its environment
         run: |
           set -eu
-          pid="$(sudo pgrep -x claimward-server)"
+          pid="$(sudo pgrep -f '^/usr/local/bin/claimward-server')"
           sudo grep -E '^(Uid|CapEff|CapBnd|CapAmb|NoNewPrivs):' "/proc/$pid/status" | tee status.txt
           grep -Eq '^CapEff:[[:space:]]+0*1000$' status.txt
           grep -Eq '^CapBnd:[[:space:]]+0*1000$' status.txt
@@ -247,7 +247,7 @@ jobs:
         run: |
           set -eu
           sudo s6-svscanctl -t /etc/s6-scan
-          timeout 30 sh -c 'while sudo pgrep -x claimward-server >/dev/null; do sleep 1; done'
+          timeout 30 sh -c 'while sudo pgrep -f "^/usr/local/bin/claimward-server" >/dev/null; do sleep 1; done'
           sleep 2
           test ! -e /run/sdcreds/claimward-server
           if grep -q sdcreds /proc/self/mountinfo; then exit 1; fi
