@@ -158,7 +158,9 @@ func TestPeersOnARealWireGuardInterface(t *testing.T) {
 		return false
 	}
 	if !has(p1, "10.80.0.5") || !has(p2, "10.80.0.6") {
-		t.Fatal("a peer added is not on the device with its address")
+		ps, _ := l.Peers()
+		ifc, _ := exec.Command("ifconfig", dev).CombinedOutput()
+		t.Fatalf("a peer added is not on the device with its address\nwgctrl sees %d peer(s): %+v\nifconfig:\n%s", len(ps), ps, ifc)
 	}
 	if out, _ := exec.Command("ifconfig", dev).CombinedOutput(); !strings.Contains(string(out), "10.80.0.5/32") ||
 		!strings.Contains(string(out), p1.String()) {
