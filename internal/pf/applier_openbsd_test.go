@@ -30,6 +30,12 @@ func pfctl(t *testing.T, stdin string, args ...string) string {
 	return out.String()
 }
 
+// flushAnchor empties an anchor; pfctl fails on one that does not exist yet,
+// which is the state to reach, so the error is ignored.
+func flushAnchor(name string) {
+	_ = exec.Command("pfctl", "-a", name, "-F", "all").Run()
+}
+
 // pfHost is a root session with pf on, or a skip; main is the main ruleset it
 // leaves in force, and the original is restored at the end.
 func pfHost(t *testing.T) {
@@ -51,7 +57,7 @@ func setMain(t *testing.T, conf string) {
 	pfctl(t, conf, "-f", "-")
 	t.Cleanup(func() {
 		pfctl(t, "anchor \"claimward\"\npass\n", "-f", "-")
-		pfctl(t, "", "-a", AnchorName, "-F", "all")
+		flushAnchor(AnchorName)
 	})
 }
 
@@ -122,7 +128,7 @@ func TestApplyReplacesThePreviousLoad(t *testing.T) {
 func TestApplyRefusesWhenTheMainRulesetDoesNotCallTheAnchor(t *testing.T) {
 	pfHost(t)
 	ensureIface(t, "wg0")
-	pfctl(t, "", "-a", AnchorName, "-F", "all")
+	flushAnchor(AnchorName)
 	for name, conf := range map[string]string{
 		"absent":     "pass\n",
 		"other name": "anchor \"other\"\npass\n",
@@ -136,7 +142,10 @@ func TestApplyRefusesWhenTheMainRulesetDoesNotCallTheAnchor(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "anchor") {
 				t.Fatalf("Apply = %v", err)
 			}
-			if rules := pfctl(t, "", "-a", AnchorName, "-sr"); strings.TrimSpace(rules) != "" {
+			// An anchor never created is the expected state after a refusal: pfctl
+			// then says "Anchor does not exist" (and exits 0).
+			out, _ := exec.Command("pfctl", "-a", AnchorName, "-sr").CombinedOutput()
+			if rules := strings.TrimSpace(string(out)); rules != "" && !strings.Contains(rules, "Anchor does not exist") {
 				t.Errorf("a refused Apply loaded rules:\n%s", rules)
 			}
 		})
@@ -146,7 +155,7 @@ func TestApplyRefusesWhenTheMainRulesetDoesNotCallTheAnchor(t *testing.T) {
 func TestApplyRefusesSetSkipOnTheInterface(t *testing.T) {
 	pfHost(t)
 	ensureIface(t, "wg0")
-	pfctl(t, "", "-a", AnchorName, "-F", "all")
+	flushAnchor(AnchorName)
 	for name, conf := range map[string]string{
 		"interface": "set skip on wg0\nanchor \"claimward\"\npass\n",
 		"group":     "set skip on wg\nanchor \"claimward\"\npass\n",

@@ -155,7 +155,7 @@ func TestEncoderMatchesPfctl(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer unix.Close(fd)
-	t.Cleanup(func() { pfctl(t, "", "-a", oracleAnchor, "-F", "all") })
+	t.Cleanup(func() { flushAnchor(oracleAnchor) })
 
 	specs := append(encoderCorpus(), []Spec{
 		{Action: Match, Iface: "wg0", AF: 4, Proto: protoTCP, MaxMSS: 1350},
@@ -166,7 +166,7 @@ func TestEncoderMatchesPfctl(t *testing.T) {
 	for i, s := range specs {
 		t.Run(strconv.Itoa(i)+" "+pfctlLine(s), func(t *testing.T) {
 			conf := "table <t0_g00000001> { 10.0.0.2 }\ntable <t1_g00000001> { 10.0.0.3 }\ntable <t2_g00000001> { 10.0.0.4 }\n" + pfctlLine(s) + "\n"
-			pfctl(t, "", "-a", oracleAnchor, "-F", "all")
+			flushAnchor(oracleAnchor)
 			pfctl(t, conf, "-a", oracleAnchor, "-f", "-")
 			raw, err := readRules(fd, oracleAnchor)
 			if err != nil {

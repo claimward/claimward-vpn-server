@@ -203,8 +203,11 @@ func load(fd int, p Plan) (err error) {
 		if err := ioctl(fd, DIOCRINADEFINE, unsafe.Pointer(&io)); err != nil {
 			return abiError("DIOCRINADEFINE "+t.Name, err)
 		}
-		if int(io.Nadd) != len(addrs) {
-			return fmt.Errorf("pf: table %s: the kernel added %d of %d addresses", t.Name, io.Nadd, len(addrs))
+		// pfrio_nadd of DIOCRINADEFINE counts TABLES created (measured on 7.9: 1
+		// for a table of two addresses), not addresses; the members are verified
+		// by verifyLoaded, which reads every table back.
+		if io.Nadd != 1 {
+			return fmt.Errorf("pf: table %s: the kernel created %d tables, want 1", t.Name, io.Nadd)
 		}
 	}
 	for i, s := range p.Rules {
