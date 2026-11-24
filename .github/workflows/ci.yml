@@ -282,6 +282,7 @@ jobs:
       - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go test -c -o pf.test ./internal/pf
       - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go build -o claimward-server ./cmd/claimward-server
       - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go test -c -o rcproof.test ./deploy/openbsd/rcproof
+      - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go test -c -o privsep.test ./internal/privsep
       - uses: vmactions/openbsd-vm@v1
         with:
           release: ${{ matrix.release }}
@@ -290,9 +291,14 @@ jobs:
             set -e
             uname -a
             id -u
+            # The parent/child protocol on this kernel: the refusals, the
+            # socketpair to a real child process.
+            ./privsep.test -test.v -test.count=1
             # The rc.d deployment (deploy/openbsd): install, rcctl start, the
-            # startup line, rcctl check, rcctl stop, and the start that must
-            # fail when pf.conf lacks the anchor.
+            # startup line, rcctl check, the process split (root parent,
+            # _claimward child, unveil+pledge), a peer enrolled through the
+            # child that reaches wg0, rcctl stop, a credential the child does
+            # not own, and the start that must fail when pf.conf lacks the anchor.
             CW_REQUIRE_OPENBSD=1 CW_SERVER_BIN="$PWD/claimward-server" CW_DEPLOY_DIR="$PWD/deploy/openbsd" ./rcproof.test -test.v -test.count=1
             CW_REQUIRE_OPENBSD=1 ./wg.test -test.v -test.count=1 -test.run 'TestIfreqMTUSize|TestSetInterfaceMTUOnARealLink'
             # The pf applier against the real kernel: struct layout vs the
@@ -386,5 +392,5 @@ jobs:
         with:
           go-version: '1.27.4'
       - run: go build ./... && go vet ./internal/pf ./internal/wg ./cmd/...
-      - run: go test -c -o /dev/null ./internal/pf && go test -c -o /dev/null ./internal/wg && go test -c -o /dev/null ./deploy/openbsd/rcproof
+      - run: go test -c -o /dev/null ./internal/pf && go test -c -o /dev/null ./internal/wg && go test -c -o /dev/null ./deploy/openbsd/rcproof && go test -c -o /dev/null ./internal/privsep && go test -c -o /dev/null ./cmd/claimward-server && go vet ./internal/privsep ./cmd/claimward-server
 

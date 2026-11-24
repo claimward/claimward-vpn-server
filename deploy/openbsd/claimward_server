@@ -4,18 +4,22 @@
 # Install: install -m 0555 claimward_server /etc/rc.d/claimward_server
 #          rcctl enable claimward_server && rcctl start claimward_server
 #
-# It runs as ROOT, on purpose. Both kernel interfaces the server drives refuse
-# anyone else: wg(4) peer configuration is behind suser(9) (sys/net/if_wg.c,
-# wg_ioctl_set: `if ((ret = suser(curproc)) != 0) return ret;`), and /dev/pf
-# is guarded only by its device node (pfopen in sys/net/pf_ioctl.c checks the
-# minor number and nothing else), which MAKEDEV creates root-only. There is no
-# privileged group to give a _claimward user, and no pledge(2) or unveil(2) to
-# narrow root with (see the server README). The deploy/README.md section
-# "OpenBSD" has the details.
+# The daemon is started as ROOT, and is two processes (privilege separation).
+# Both kernel interfaces the server drives refuse anyone else: wg(4) peer
+# configuration is behind suser(9) (sys/net/if_wg.c, wg_ioctl_set), and /dev/pf
+# is guarded only by its device node (root-only). So the root process does
+# those, and nothing else: it holds no secret, serves no network, and unveils
+# only /dev/pf. It starts a child as the _claimward user, which holds the
+# secrets, the listeners and the policy, and is restricted with unveil(2) and
+# pledge(2) before it serves; the child asks the root process for the few
+# things the kernel needs (add or remove a peer, the tunnel MTU, the firewall
+# of the tenants) and the root process refuses anything outside the address pool.
+# The deploy/README.md section "OpenBSD" has the details.
 #
 # Secrets are files in /etc/claimward/credentials (CREDENTIALS_DIRECTORY),
-# never the environment. /etc/claimward/environment holds only the non-secret
-# settings, as sh assignments.
+# owned by _claimward, mode 0400, never the environment.
+# /etc/claimward/environment holds only the non-secret settings, as sh
+# assignments, and stays root's.
 
 daemon="/usr/local/bin/claimward-server"
 daemon_user="root"
@@ -34,6 +38,14 @@ rc_configtest() {
 	}
 	[ -d /etc/claimward/credentials ] || {
 		echo "/etc/claimward/credentials is missing" >&2
+		return 1
+	}
+	id _claimward >/dev/null 2>&1 || {
+		echo "the _claimward user is missing: useradd -g =uid -c claimward -d /var/empty -s /sbin/nologin -r 1..999 _claimward" >&2
+		return 1
+	}
+	[ "$(stat -f %Su /etc/claimward/credentials)" = "_claimward" ] || {
+		echo "/etc/claimward/credentials must be owned by _claimward (chown -R _claimward:_claimward, files 0400)" >&2
 		return 1
 	}
 }

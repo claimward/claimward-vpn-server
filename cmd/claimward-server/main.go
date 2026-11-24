@@ -47,10 +47,12 @@ import (
 	"github.com/claimward/claimward-vpn-server/internal/api"
 	"github.com/claimward/claimward-vpn-server/internal/auth"
 	"github.com/claimward/claimward-vpn-server/internal/config"
+	"github.com/claimward/claimward-vpn-server/internal/fw"
 	"github.com/claimward/claimward-vpn-server/internal/grpcsrv"
 	"github.com/claimward/claimward-vpn-server/internal/ipam"
 	"github.com/claimward/claimward-vpn-server/internal/metrics"
 	"github.com/claimward/claimward-vpn-server/internal/peers"
+	"github.com/claimward/claimward-vpn-server/internal/privsep"
 	"github.com/claimward/claimward-vpn-server/internal/ssfpoll"
 	"github.com/claimward/claimward-vpn-server/internal/store"
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
@@ -63,13 +65,24 @@ import (
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel()}))
-	if err := run(log); err != nil {
+	// On OpenBSD (outside a dry run) the server is two processes: this one
+	// started as root does the kernel's side only, and serves a child that
+	// holds the secrets and the network. See privsep_openbsd.go.
+	handled, err := privsepMain(log)
+	if !handled {
+		err = run(log, nil)
+	}
+	if err != nil {
 		log.Error("fatal", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger) error {
+// run is the server. link is nil when one process does everything (Linux, a
+// dry run); otherwise it is the unprivileged child of a privileged parent,
+// and the WireGuard peers, the tunnel MTU and the firewall are requests to
+// that parent.
+func run(log *slog.Logger, link *privsep.Client) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -103,14 +116,20 @@ func run(log *slog.Logger) error {
 	}
 
 	var gw wg.Gateway
-	if cfg.DryRun {
+	var ap fw.Applier
+	switch {
+	case link != nil:
+		gw, ap = link, link
+	case cfg.DryRun:
 		log.Warn("WG_DRYRUN enabled: gateway operations are logged, not applied")
 		gw = wg.NewDryRunGateway(log)
-	} else {
+		ap = newApplier(cfg.DryRun, log)
+	default:
 		gw, err = wg.NewGateway(cfg.WGInterface)
 		if err != nil {
 			return err
 		}
+		ap = newApplier(cfg.DryRun, log)
 	}
 	defer gw.Close()
 	// Leases are held in memory: the peers a previous run left on the
@@ -119,13 +138,29 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	if n, err := wg.Sweep(gw, pool); err != nil {
+	sweep := func() (int, error) { return wg.Sweep(gw, pool) }
+	if link != nil {
+		sweep = link.Sweep
+	}
+	if n, err := sweep(); err != nil {
 		return fmt.Errorf("remove the peers a previous run left on %s: %w", cfg.WGInterface, err)
 	} else if n > 0 {
 		log.Warn("removed peers a previous run left; their devices enroll again", "interface", cfg.WGInterface, "peers", n)
 	}
 
-	if err := applyTunnelMTU(cfg, wg.UplinkMTU, wg.SetInterfaceMTU, log); err != nil {
+	setMTU := func() error { return applyTunnelMTU(cfg, wg.UplinkMTU, wg.SetInterfaceMTU, log) }
+	if link != nil {
+		setMTU = func() error {
+			mtu, err := link.SetTunnelMTU(cfg.TunnelMTU)
+			if err != nil {
+				return err
+			}
+			cfg.TunnelMTU = mtu
+			log.Info("tunnel MTU", "interface", cfg.WGInterface, "mtu", mtu)
+			return nil
+		}
+	}
+	if err := setMTU(); err != nil {
 		return err
 	}
 
@@ -146,7 +181,7 @@ func run(log *slog.Logger) error {
 	// ⛔ Fail closed: what each peer may reach is ENFORCED here, by the
 	// kernel's nftables, before any peer can be enrolled. If the ruleset
 	// cannot be installed the server does not start.
-	fwm, err := startFirewall(cfg.WGInterface, cfg.TunnelMTU, newApplier(cfg.DryRun, log), ts, st, log)
+	fwm, err := startFirewall(cfg.WGInterface, cfg.TunnelMTU, ap, ts, st, log)
 	if err != nil {
 		return err
 	}
@@ -247,6 +282,20 @@ func run(log *slog.Logger) error {
 		}
 	}()
 
+	if link != nil {
+		// ⛔ Fail closed: everything this process needs from the system is open
+		// (config, credentials, tenants, listeners). From here it may read the
+		// few files TLS and DNS need, talk on the network, and nothing else.
+		if err := lockdown(cfg, log); err != nil {
+			return fmt.Errorf("restrict the unprivileged process: %w", err)
+		}
+		go func() {
+			<-link.Done()
+			log.Error("the privileged parent is gone; stopping")
+			stop()
+		}()
+	}
+
 	log.Info("claimward-server listening",
 		"addr", cfg.ListenAddr, "interface", cfg.WGInterface,
 		"endpoint", cfg.WGEndpoint, "vpn_cidr", cfg.VPNCIDR,
@@ -257,6 +306,13 @@ func run(log *slog.Logger) error {
 	} else {
 		log.Warn("serving plain HTTP — terminate TLS at a proxy or set TLS_CERT/TLS_KEY in production")
 		err = serveLimited(httpSrv, "", "")
+	}
+	if link != nil {
+		select {
+		case <-link.Done():
+			return errors.New("the privileged parent went away")
+		default:
+		}
 	}
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil

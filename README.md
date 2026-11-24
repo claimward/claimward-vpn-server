@@ -252,15 +252,28 @@ fail closed.
   nothing), `set skip on` covering the WireGuard interface (`wg0`, `wg*`).
 - **Deployment.** [`deploy/openbsd/`](deploy/openbsd/) ships an `rc.d` script,
   a `pf.conf` fragment, a `hostname.wg0` and the credentials layout
-  ([deploy/README.md](deploy/README.md#openbsd-79-and-80)). The server runs as
-  root: wg(4) peer configuration needs `suser(9)` and `/dev/pf` is root-only.
+  ([deploy/README.md](deploy/README.md#openbsd-79-and-80)).
+- **Privilege separation, from v0.11.0.** wg(4) peer configuration needs
+  `suser(9)` and `/dev/pf` is root-only, so the daemon is two processes. The
+  **parent** (root) only adds and removes WireGuard peers, sets the tunnel MTU
+  and loads the pf anchor; it reads no credential, serves no network, and
+  `unveil(2)`s `/dev/pf` alone. The **child**, run as `_claimward`, holds the
+  secrets, the listeners and the policy, is restricted with `unveil(2)` and
+  `pledge(2)` (`stdio rpath inet dns`) before it serves, and asks the parent
+  over a socketpair. The parent refuses a malformed, oversized, unknown or
+  out-of-pool request, and builds the ruleset itself, so the child never names a
+  rule. If the child cannot drop privileges, unveil or pledge, the server does
+  not start, and there is no flag to disable it. A compromised child can still
+  change the policy of the peers in the pool; it cannot reach the rest of the
+  host. Linux and `WG_DRYRUN` stay one process. Ports must be above 1024.
 - **Table names** carry a per-load generation suffix, so the short window between
   the table commit and the rule commit never applies one tenant's rules to
   another tenant's peers.
-- **No `pledge(2)`.** The `pf` promise allows twelve `DIOC*` ioctls
-  (`sys/kern/kern_pledge.c`, `pledge_ioctl`); the server also needs
+- **The privileged parent has no `pledge(2)`.** The `pf` promise allows twelve
+  `DIOC*` ioctls (`sys/kern/kern_pledge.c`, `pledge_ioctl`); it also needs
   `DIOCRINADEFINE`, `DIOCXROLLBACK`, `DIOCGETRULES`, `DIOCGETRULE`, `DIOCXEND`
-  and `DIOCRGETADDRS`, and a pledge cannot be widened later.
+  and `DIOCRGETADDRS`, and a pledge cannot be widened later. Its narrowing is
+  that it is small, secret-free and network-free, and `unveil`ed.
 - **Tests.** The `openbsd` CI lane runs `internal/pf` as root in real 7.9 and 8.0
   VMs: struct layout against the release's own header, load and read-back,
   `pfctl` as an oracle for the encoding, and a packet proof (traffic across

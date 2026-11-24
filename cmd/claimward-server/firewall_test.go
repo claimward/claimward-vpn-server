@@ -84,7 +84,7 @@ func TestRunRefusesABadTenantsFile(t *testing.T) {
 		}
 	})
 	defer stop.Stop()
-	if err := run(quiet); err == nil {
+	if err := run(quiet, nil); err == nil {
 		t.Fatal("run went on with an unreadable tenants file")
 	}
 }
@@ -99,7 +99,7 @@ func TestRunRefusesAnOpenGitHubGate(t *testing.T) {
 		}
 	})
 	defer stop.Stop()
-	if err := run(quiet); err == nil {
+	if err := run(quiet, nil); err == nil {
 		t.Fatal("run started with no org allowlist and no named member")
 	}
 }
@@ -115,7 +115,7 @@ func TestRunRefusesMembersWithoutAGitHubToken(t *testing.T) {
 		}
 	})
 	defer stop.Stop()
-	err := run(quiet)
+	err := run(quiet, nil)
 	if err == nil || !strings.Contains(err.Error(), "github-token") {
 		t.Fatalf("err = %v, want one naming github-token", err)
 	}
@@ -134,7 +134,7 @@ func TestRunDoesNotStartWithoutAFirewall(t *testing.T) {
 		}
 	})
 	defer stop.Stop()
-	if err := run(quiet); err == nil {
+	if err := run(quiet, nil); err == nil {
 		t.Fatal("run started without a firewall")
 	}
 }

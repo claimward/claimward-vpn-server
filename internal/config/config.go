@@ -5,6 +5,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -176,6 +177,28 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
 	}
 	return c, nil
+}
+
+// Gateway is the part of the configuration that the privileged parent of a
+// privilege-separated server needs: where the tunnel is and which addresses
+// its peers may have. It is read from the same variables, with the same
+// defaults, as Load; and it reads no credential: the parent holds no secret.
+type Gateway struct {
+	Interface string
+	Pool      netip.Prefix
+	DryRun    bool
+}
+
+// LoadGateway reads WG_INTERFACE, VPN_CIDR and WG_DRYRUN.
+func LoadGateway() (Gateway, error) {
+	g := Gateway{Interface: env("WG_INTERFACE", "wg0"), DryRun: boolEnv("WG_DRYRUN", false)}
+	cidr := env("VPN_CIDR", "10.80.0.0/24")
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil || !p.Addr().Is4() {
+		return Gateway{}, fmt.Errorf("invalid VPN_CIDR %q: want an IPv4 prefix such as 10.80.0.0/24", cidr)
+	}
+	g.Pool = p.Masked()
+	return g, nil
 }
 
 // optional reads a credential that may be absent; one that is present but
