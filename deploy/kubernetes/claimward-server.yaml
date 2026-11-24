@@ -62,6 +62,8 @@ spec:
             - {name: WG_ENDPOINT, value: "vpn.example.org:51820"}
             - {name: AUTH_PROVIDER, value: github}
             - {name: GITHUB_ALLOWED_ORGS, value: example-org}
+            # /metrics is off unless METRICS_ADDR is set (it names every tenant):
+            # - {name: METRICS_ADDR, value: "0.0.0.0:9100"}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

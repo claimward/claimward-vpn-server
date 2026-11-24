@@ -113,7 +113,7 @@ Beyond the enrollment API, the server exposes:
   a `GET /admin/api/overview`, tenant CRUD at `/admin/api/tenants[...]`, and an
   embedded Svelte single-page app. Disabled unless the `admin-token` credential exists.
 - **Prometheus metrics** — exposition at `/metrics` on its own listener,
-  `METRICS_ADDR` (default `127.0.0.1:9090`), never on the enrollment port.
+  `METRICS_ADDR` (off unless set: no default port), never on the enrollment port.
   Every listener has read, write and idle timeouts and a connection cap;
   the gRPC server enforces keepalive and a per-connection stream limit.
 
@@ -256,7 +256,13 @@ group or other permission (`0400`), non-empty and at most 64 KiB. One more
 shape is accepted, for Kubernetes: a file **owned by root, mode exactly `0440`,
 whose group is the process's gid or one of its supplementary groups** (what a
 Secret volume gives with `defaultMode: 0440` and `fsGroup`), so the pod need not
-run as root. Otherwise the server refuses, with the fix: Swarm `mode: 0400`,
+run as root. A third shape is what systemd gives a service run as another user
+(`DynamicUser=yes`, `LoadCredential=`, `LoadCredentialEncrypted=`): a **root-owned
+file whose access ACL names exactly one user, the server's uid, with read only**
+(`user::r--`, `user:<uid>:r--`, `group::---`, `mask::r--`, `other::---`; `stat`
+shows `0440` because the group bits are the ACL mask). The ACL is read from the
+open descriptor; any other named user or group, any write or execute bit, or a
+malformed or oversized ACL is refused. Otherwise the server refuses, with the fix: Swarm `mode: 0400`,
 Kubernetes `defaultMode: 0440` + `fsGroup`/`runAsUser`/`runAsGroup`, Podman
 `--secret ...,mode=0400`, else `chmod 0400`.
 
@@ -307,7 +313,7 @@ does not depend on it.
 | `MAX_DEVICES_PER_SUBJECT` | | `5` | most devices one account may have enrolled at once (a further new key gets 429 `too_many_devices`) |
 | `LISTEN_ADDR` | | `:8443` | HTTP control-plane listen address |
 | `GRPC_ADDR` | | `:8444` | RouteService gRPC listen address |
-| `METRICS_ADDR` | | `127.0.0.1:9090` | where `/metrics` is served, on its own listener (it names every tenant, so it is loopback by default; expose it only on a trusted network) |
+| `METRICS_ADDR` | | off | where `/metrics` is served, on its own listener. Unset means no metrics at all (there is no default port to clash with another service, `:9090` being Prometheus' own); set it to `127.0.0.1:9100`, say. It names every tenant: expose it only on a trusted network |
 | `GRPC_ENDPOINT` | | — | `host:port` advertised to clients for route streaming |
 | `DEBUG` | | — | any value enables debug logging |
 | `TLS_CERT` / `TLS_KEY` | | — | enable HTTPS **and TLS on the gRPC RouteService**. A route watch carries the bearer token, and claimward clients refuse a plaintext one except on loopback; without these, devices connect but get no live route updates |

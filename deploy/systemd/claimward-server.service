@@ -14,7 +14,8 @@ RestartSec=5
 
 # --- Secrets: a credentials directory, never the environment -------------
 # systemd decrypts each credential into $CREDENTIALS_DIRECTORY (a private
-# tmpfs, mode 0400, owned by the service's user) and sets the variable.
+# tmpfs) and sets the variable. With DynamicUser= the file stays root:root and
+# an ACL gives the service's user read access; the server accepts exactly that.
 # Create them with `systemd-creds encrypt` (see deploy/README.md).
 LoadCredentialEncrypted=wg-private-key:/etc/credstore.encrypted/claimward.wg-private-key
 # Add the ones your configuration needs; a missing file stops the unit.
@@ -30,6 +31,10 @@ Environment=WG_ENDPOINT=vpn.example.org:51820
 Environment=AUTH_PROVIDER=github
 Environment=GITHUB_ALLOWED_ORGS=example-org
 Environment=WG_INTERFACE=wg0
+# /metrics is OFF unless this is set (no default port, so nothing clashes with
+# Prometheus on :9090). It names every tenant: keep it on loopback or a
+# trusted network.
+#Environment=METRICS_ADDR=127.0.0.1:9100
 # TENANTS_FILE is read by the service's user: keep it under /etc/claimward
 # (world-readable is fine, it holds no secret) and set it here:
 #Environment=TENANTS_FILE=/etc/claimward/tenants.json

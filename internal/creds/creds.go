@@ -118,6 +118,7 @@ func fix(name string) string {
 		"and `fsGroup: <gid>` with `runAsUser: <uid>` / `runAsGroup: <gid>` in the pod securityContext " +
 		"(the files are root:<fsGroup>, mode 0440, which the server accepts; 0444 or 0644 it refuses); " +
 		"Podman: `--secret " + name + ",mode=0400`; " +
+		"systemd: `LoadCredential=` / `LoadCredentialEncrypted=` as shipped (root-owned file with a read-only ACL for the service's user is accepted); " +
 		"otherwise: `chown <service user> " + EnvDir + "/" + name + " && chmod 0400 " + EnvDir + "/" + name + "`"
 }
 

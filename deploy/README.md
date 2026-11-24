@@ -12,11 +12,16 @@ never an environment variable. The names are fixed:
 
 The server refuses a file that is a symlink, not a regular file, readable by
 group or other, not owned by its own uid, empty, or over 64 KiB. Each platform
-below gives the files the right owner and mode.
+below gives the files the right owner and mode. (Two root-owned shapes are
+accepted: `0440` with the process's group, Kubernetes; and a read-only ACL for
+the process's uid, systemd. CI starts the systemd unit to prove the second.)
+
+`/metrics` is **off** unless `METRICS_ADDR` is set; the examples carry it as a
+commented line.
 
 | Platform | Directory | Files | Unit |
 |----------|-----------|-------|------|
-| systemd | set by `LoadCredentialEncrypted=` | owned by the service user, `0400`, on a private tmpfs | [`systemd/claimward-server.service`](systemd/claimward-server.service) |
+| systemd | set by `LoadCredentialEncrypted=` | with `DynamicUser=yes` (as shipped): root-owned with a read-only ACL for the service's uid, which the server accepts; with a fixed `User=` on a filesystem without ACLs: owned by the service user, `0400`. Private tmpfs | [`systemd/claimward-server.service`](systemd/claimward-server.service) |
 | Docker Compose / Swarm | `/run/secrets` (set `CREDENTIALS_DIRECTORY` by hand) | Swarm: `mode: 0400`; plain Compose: chown/chmod the host file | [`compose/compose.yaml`](compose/compose.yaml) |
 | Podman (Quadlet) | `/run/secrets` (set by hand) | `Secret=...,mode=0400,uid=...` | [`podman/claimward-server.container`](podman/claimward-server.container) |
 | Kubernetes | the Secret volume's mount path (set by hand) | `defaultMode: 0440` + `fsGroup`: files are root:fsGroup `0440`, accepted; the pod runs as uid/gid 65532 with only `NET_ADMIN`, which needs `setcap cap_net_admin=+ep` on the image binary (see below) | [`kubernetes/claimward-server.yaml`](kubernetes/claimward-server.yaml) |
