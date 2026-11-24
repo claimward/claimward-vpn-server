@@ -7,8 +7,28 @@ import (
 	"strings"
 	"testing"
 
+	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
+
+// A device wgctrl cannot read is an error from the wgctrl-backed reader, not a
+// nil dereference.
+func TestWgctrlWriterReportsAMissingDevice(t *testing.T) {
+	c, err := wgctrl.New()
+	if err != nil {
+		t.Skipf("no wgctrl client here: %v", err)
+	}
+	defer c.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("peers panicked: %v", r)
+		}
+	}()
+	ps, err := wgctrlWriter{client: c, device: "cwnosuchdev0"}.peers()
+	if err == nil || ps != nil {
+		t.Errorf("peers of a missing device = %v, %v; want an error", ps, err)
+	}
+}
 
 type fakeWriter struct {
 	calls [][]peerOp

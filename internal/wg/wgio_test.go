@@ -223,11 +223,26 @@ func TestDecodeGetRefusals(t *testing.T) {
 			binary.NativeEndian.PutUint32(b[l.IfaceSize+l.PeerSize+l.AipCidr:], 129)
 		}), "cidr"},
 	}
+	// Two peers where the first one's address uses up the room of the second.
+	cases = append(cases, struct {
+		name string
+		buf  []byte
+		want string
+	}{"second header past the end", append(bad(func(b []byte) { binary.NativeEndian.PutUint64(b[l.IfacePeersCount:], 2) }), make([]byte, l.PeerSize-l.AipSize)...), "header past the end"})
 	for _, c := range cases {
-		out, err := decodeGet(l, c.buf)
-		if err == nil || !strings.Contains(err.Error(), c.want) || out != nil {
-			t.Errorf("%s: got %v, %v; want an error with %q", c.name, out, err, c.want)
-		}
+		func() {
+			// A guard that is missing must show as a failed assertion, not as a
+			// crash of the whole test binary.
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s: decodeGet panicked: %v", c.name, r)
+				}
+			}()
+			out, err := decodeGet(l, c.buf)
+			if err == nil || !strings.Contains(err.Error(), c.want) || out != nil {
+				t.Errorf("%s: got %v, %v; want an error with %q", c.name, out, err, c.want)
+			}
+		}()
 	}
 	// The boundary itself decodes: /32 on IPv4 and /128 on IPv6.
 	if _, err := decodeGet(l, good); err != nil {
