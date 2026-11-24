@@ -1,0 +1,4 @@
+#!/bin/sh
+# Takes the credentials mount away if s6-run could not (a SIGKILL of s6-run).
+# Idempotent.
+exec sdcreds s6-finish --service claimward-server

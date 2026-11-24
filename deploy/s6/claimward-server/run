@@ -1,0 +1,29 @@
+#!/bin/sh
+# s6 service for claimward-server on a host without systemd.
+#
+# Secrets: `sdcreds s6-run` decrypts every file of --source (one per credential,
+# named exactly like it and encrypted with --name=<that name>) into a private
+# tmpfs, mode 0400, owned by --user, and sets $CREDENTIALS_DIRECTORY for the
+# server. The server accepts such a file: it is the process's own, with no group
+# or other access. Nothing secret goes in the environment, in argv or in a URL.
+#
+# The server runs as --user with no capability except CAP_NET_ADMIN (wgctrl,
+# nftables, interface MTU), kept by --keep-cap, and with no_new_privs on.
+# NET_ADMIN acts on the network namespace the service runs in: the host's,
+# unless you start the supervision tree inside one of its own (ip netns exec).
+#
+# See deploy/README.md ("Hosts without systemd") for the one-time setup.
+exec 2>&1
+
+# Non-secret configuration, in a file the service user may read (no secret
+# here): WG_ENDPOINT=..., AUTH_PROVIDER=..., GITHUB_ALLOWED_ORGS=...
+set -a
+[ -r /etc/claimward/env ] && . /etc/claimward/env
+set +a
+
+exec sdcreds s6-run \
+    --service claimward-server \
+    --user claimward \
+    --source /etc/claimward/credentials.encrypted \
+    --keep-cap=CAP_NET_ADMIN \
+    -- /usr/local/bin/claimward-server

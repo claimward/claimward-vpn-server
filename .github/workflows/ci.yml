@@ -169,6 +169,95 @@ jobs:
       - if: failure()
         run: sudo journalctl -u claimward-server --no-pager; sudo systemctl status claimward-server --no-pager || true
 
+  # Hosts without systemd: deploy/s6/claimward-server is run by a real
+  # s6-svscan, which starts `sdcreds s6-run`. NOT a dry run: the server drives a
+  # real wireguard link and nftables, inside a network namespace of its own so
+  # that CAP_NET_ADMIN never touches the runner's. Proved: the server logs the
+  # public key derived from the encrypted credential (a control key must be
+  # absent), runs as the service user with CapEff == 0x1000 (CAP_NET_ADMIN
+  # alone), keeps the secret out of its environment, and the credentials mount is
+  # gone after the service stops. A world-readable file is refused (control).
+  s6-sdcreds:
+    name: start the s6 service (sdcreds, CAP_NET_ADMIN kept)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.4'
+      - run: sudo apt-get install -y --no-install-recommends wireguard-tools s6
+      - run: sudo modprobe wireguard nf_tables || true
+      - run: CGO_ENABLED=0 go build -o claimward-server ./cmd/claimward-server
+      - run: sudo install -m 0755 claimward-server /usr/local/bin/claimward-server
+      - run: GOBIN="$PWD/bin" go install github.com/go-authn/sdcreds/cmd/sdcreds@v0.2.0
+      - run: sudo install -m 0755 bin/sdcreds /usr/local/bin/sdcreds
+      - name: set up the host, the credential and the scan directory
+        run: |
+          set -eu
+          key="$(wg genkey)"
+          echo "pub=$(printf '%s' "$key" | wg pubkey)" >> "$GITHUB_ENV"
+          echo "other=$(wg genkey | wg pubkey)" >> "$GITHUB_ENV"
+          sudo useradd --system --no-create-home --shell /usr/sbin/nologin claimward
+          sudo sdcreds setup
+          sudo install -d -m 0755 /etc/claimward /etc/claimward/credentials.encrypted
+          printf '%s\n' "$key" | sudo sdcreds encrypt --name=wg-private-key - /etc/claimward/credentials.encrypted/wg-private-key
+          printf 'WG_ENDPOINT=vpn.example.org:51820\nAUTH_PROVIDER=github\nGITHUB_ALLOWED_ORGS=example-org\nWG_INTERFACE=wg0\n' | sudo tee /etc/claimward/env >/dev/null
+          sudo install -d -m 0755 /etc/s6-scan
+          sudo cp -a deploy/s6/claimward-server /etc/s6-scan/claimward-server
+          sudo ip netns add cw
+          sudo ip netns exec cw ip link set lo up
+          sudo ip netns exec cw ip link add wg0 type wireguard
+          sudo ip netns exec cw ip link set wg0 up
+      - name: start the service under s6-svscan
+        run: |
+          set -eu
+          sudo sh -c "ip netns exec cw s6-svscan /etc/s6-scan > $RUNNER_TEMP/svscan.log 2>&1 &"
+          timeout 60 sh -c "until grep -F server_pubkey $RUNNER_TEMP/svscan.log | grep -qF '$pub'; do sleep 1; done"
+          cat "$RUNNER_TEMP/svscan.log"
+          # Control: a key we did not give it must not be in the log.
+          if grep -qF "$other" "$RUNNER_TEMP/svscan.log"; then exit 1; fi
+          grep -qF 'dry_run=false' "$RUNNER_TEMP/svscan.log"
+      - name: the service runs with CAP_NET_ADMIN alone, as its user, with no secret in its environment
+        run: |
+          set -eu
+          pid="$(sudo pgrep -f '^/usr/local/bin/claimward-server')"
+          sudo grep -E '^(Uid|CapEff|CapBnd|CapAmb|NoNewPrivs):' "/proc/$pid/status" | tee status.txt
+          grep -Eq '^CapEff:[[:space:]]+0*1000$' status.txt
+          grep -Eq '^CapBnd:[[:space:]]+0*1000$' status.txt
+          grep -Eq '^NoNewPrivs:[[:space:]]+1$' status.txt
+          test "$(awk '/^Uid:/{print $2}' status.txt)" = "$(id -u claimward)"
+          # The secret is a file in the private mount, never in the environment.
+          sudo cat "/proc/$pid/environ" | tr '\0' '\n' > environ.txt
+          grep -q '^CREDENTIALS_DIRECTORY=/run/sdcreds/claimward-server$' environ.txt
+          if grep -qiE 'wg_private|admin_token|gateway_secret' environ.txt; then exit 1; fi
+          # The mount is private to the service: the host does not see it.
+          test ! -e /run/sdcreds/claimward-server/wg-private-key
+      - name: control, a credential file that is not safe is refused
+        run: |
+          set -eu
+          # Under /etc: the service user must be able to reach the file, so the
+          # refusal is about the mode, not about a directory it cannot enter.
+          d=/etc/claimward/badcreds
+          sudo install -d -m 0755 "$d"
+          sudo sh -c "wg genkey > $d/wg-private-key && chown claimward $d/wg-private-key && chmod 0644 $d/wg-private-key"
+          test "$(stat -c %a $d/wg-private-key)" = 644
+          if sudo -u claimward env CREDENTIALS_DIRECTORY="$d" WG_DRYRUN=true WG_ENDPOINT=x:1 AUTH_PROVIDER=github GITHUB_ALLOWED_ORGS=x /usr/local/bin/claimward-server > bad.txt 2>&1; then
+            cat bad.txt; exit 1
+          fi
+          cat bad.txt
+          grep -q 'has mode 0644' bad.txt
+          grep -q 'refused' bad.txt
+      - name: stopping the service takes the credentials away
+        run: |
+          set -eu
+          sudo s6-svscanctl -t /etc/s6-scan
+          timeout 30 sh -c 'while sudo pgrep -f "^/usr/local/bin/claimward-server" >/dev/null; do sleep 1; done'
+          sleep 2
+          test ! -e /run/sdcreds/claimward-server
+          if grep -q sdcreds /proc/self/mountinfo; then exit 1; fi
+      - if: failure()
+        run: cat "$RUNNER_TEMP/svscan.log" || true
+
   # OpenBSD: the test binaries are cross-built here and RUN as root inside a
   # real OpenBSD VM (no Go toolchain needed there). CW_REQUIRE_OPENBSD=1 makes
   # a skipped privileged test a failure. The VM is the swappable part: a

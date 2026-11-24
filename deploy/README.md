@@ -26,6 +26,7 @@ commented line.
 | Podman (Quadlet) | `/run/secrets` (set by hand) | `Secret=...,mode=0400,uid=...` | [`podman/claimward-server.container`](podman/claimward-server.container) |
 | Kubernetes | the Secret volume's mount path (set by hand) | `defaultMode: 0440` + `fsGroup`: files are root:fsGroup `0440`, accepted; the pod runs as uid/gid 65532 with only `NET_ADMIN`, which needs `setcap cap_net_admin=+ep` on the image binary (see below) | [`kubernetes/claimward-server.yaml`](kubernetes/claimward-server.yaml) |
 | OpenBSD (rc.d, pf) | `/etc/claimward/credentials` (the rc.d script sets `CREDENTIALS_DIRECTORY`) | owned by root, `0400`, in a `0700` directory (`install(1)`) | [`openbsd/claimward_server`](openbsd/claimward_server) |
+| s6 (no systemd) | `/run/sdcreds/claimward-server`, set by `sdcreds s6-run` | owned by the service user, `0400`, in a private tmpfs | [`s6/claimward-server/`](s6/claimward-server/run) |
 
 The container image is `ghcr.io/claimward/claimward-vpn-server:<tag>`, built
 from the [`Dockerfile`](../Dockerfile) on every tag for amd64 and arm64
@@ -143,11 +144,38 @@ and asserts that the start fails.
 
 ## Hosts without systemd
 
-`go-authn/sdcreds` (`sdcreds s6-run`) will provide the same directory under s6
-and similar supervisors, once its v0.1.0 is tagged. It is not tagged yet, and
-nothing here depends on it: until then, create the directory by hand
-(`install -d -m 0700`, files `0400`, owned by the service's uid) and export
-`CREDENTIALS_DIRECTORY`.
+[`go-authn/sdcreds`](https://github.com/go-authn/sdcreds) (v0.2.0 or later)
+provides the same directory under s6. The service directory is
+[`s6/claimward-server`](s6/claimward-server/run) (`run`, `finish`). `sdcreds
+s6-run` decrypts the files of `--source` into a private tmpfs (mode 0400, owned
+by `--user`, which is the shape the server accepts: the process's own file),
+sets `CREDENTIALS_DIRECTORY`, and starts the server as that user in a child
+whose capability set is exactly what `--keep-cap` names. The server needs
+`CAP_NET_ADMIN` and nothing else, so the example keeps that one; `no_new_privs`
+stays on. `s6-run` needs root and `CAP_SYS_ADMIN` (it mounts).
+
+```sh
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin claimward
+sudo sdcreds setup                       # host secret, if missing
+sudo install -d /etc/claimward/credentials.encrypted
+wg genkey | sudo sdcreds encrypt --name=wg-private-key - /etc/claimward/credentials.encrypted/wg-private-key
+# optional: github-token, admin-token, goauthn-gateway-secret, the same way
+printf 'WG_ENDPOINT=vpn.example.org:51820\nAUTH_PROVIDER=github\nGITHUB_ALLOWED_ORGS=example-org\n' | sudo tee /etc/claimward/env
+sudo cp -a s6/claimward-server /etc/s6-scan/   # your scan directory; s6-svscan picks it up
+```
+
+Rules to know: every file of `--source` must be named like its credential and
+encrypted with that `--name` (an unknown name stops the start); `/etc/claimward/env`
+is for non-secret settings only; `CAP_NET_ADMIN` acts on the network namespace the
+supervision tree runs in, the host's unless you start `s6-svscan` inside one of
+its own (`ip netns exec`). The CI lane `s6-sdcreds` starts this directory under a
+real `s6-svscan` (the server drives a real wireguard link and nftables, in a
+network namespace), checks the derived public key in the log, `CapEff` ==
+`0x1000`, that no secret is in the environment, that a 0644 credential is
+refused, and that stopping the service takes the mount away.
+
+Containers do not need `sdcreds`: Compose, Podman and Kubernetes (above) mount
+secrets as files already.
 
 ## Migrating from v0.5.0
 
