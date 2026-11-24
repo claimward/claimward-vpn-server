@@ -1,4 +1,4 @@
-# Deploying claimward-server (v0.6.0)
+# Deploying claimward-server (v0.7.2)
 
 Every secret is a **file in a credentials directory**, `$CREDENTIALS_DIRECTORY`,
 never an environment variable. The names are fixed:
@@ -21,8 +21,18 @@ below gives the files the right owner and mode.
 | Podman (Quadlet) | `/run/secrets` (set by hand) | `Secret=...,mode=0400,uid=...` | [`podman/claimward-server.container`](podman/claimward-server.container) |
 | Kubernetes | the Secret volume's mount path (set by hand) | `defaultMode: 0440` + `fsGroup`: files are root:fsGroup `0440`, accepted; the pod runs as uid/gid 65532 with only `NET_ADMIN`, which needs `setcap cap_net_admin=+ep` on the image binary (see below) | [`kubernetes/claimward-server.yaml`](kubernetes/claimward-server.yaml) |
 
-No container image is published yet; the container examples name a placeholder
-registry. The WireGuard interface (`wg0`) must already exist on the host (for
+The container image is `ghcr.io/claimward/claimward-vpn-server:<tag>`, built
+from the [`Dockerfile`](../Dockerfile) on every tag for amd64 and arm64
+(distroless, uid 65532). It is signed with cosign (keyless) and carries a build
+provenance attestation:
+
+```sh
+cosign verify ghcr.io/claimward/claimward-vpn-server:v0.7.2 \
+  --certificate-identity-regexp '^https://github.com/claimward/claimward-vpn-server/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The WireGuard interface (`wg0`) must already exist on the host (for
 containers: host networking).
 
 ## systemd
@@ -47,7 +57,7 @@ unit; `systemd-analyze security claimward-server.service` scores the hardening.
 
 ## Kubernetes (non-root)
 
-Since v0.6.1 the pod runs as uid/gid 65532, `runAsNonRoot: true`, with
+Since v0.7.1 the pod runs as uid/gid 65532, `runAsNonRoot: true`, with
 `capabilities: drop [ALL], add [NET_ADMIN]`, `allowPrivilegeEscalation: false`,
 `readOnlyRootFilesystem: true` and the `RuntimeDefault` seccomp profile. The
 Secret volume has `defaultMode: 0440` and the pod `fsGroup: 65532`, so the files
@@ -65,6 +75,12 @@ capabilities. So the image's binary must carry them:
 ```sh
 setcap cap_net_admin=+ep /claimward-server   # in the image build
 ```
+
+The published image already does: the [`Dockerfile`](../Dockerfile) runs
+`setcap` in the build stage and copies the binary into the distroless final
+stage, and the CI lane `image` exports the FINAL image and reads
+`security.capability` back (with a control extraction that must show none). A
+self-built image must keep the attribute through any copy.
 
 `no_new_privs` (`allowPrivilegeEscalation: false`) does not prevent this, since
 the file capability grants nothing beyond what `add` already put in the

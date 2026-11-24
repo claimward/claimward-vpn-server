@@ -1,0 +1,6 @@
+.git
+.github
+admin-ui/node_modules
+bin
+claimward-server
+*.test
