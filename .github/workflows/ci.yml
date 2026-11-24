@@ -128,6 +128,36 @@ jobs:
       - run: sudo install -m 0755 /bin/true /usr/local/bin/claimward-server
       - run: systemd-analyze verify deploy/systemd/claimward-server.service
 
+  # OpenBSD: the test binaries are cross-built here and RUN as root inside a
+  # real OpenBSD VM (no Go toolchain needed there). CW_REQUIRE_OPENBSD=1 makes
+  # a skipped privileged test a failure. The VM is the swappable part: a
+  # self-hosted OpenBSD runner can replace the vmactions step.
+  openbsd:
+    name: openbsd ${{ matrix.release }} (${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ['7.9', '8.0']
+        goarch: [amd64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.4'
+      - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go build ./...
+      - run: CGO_ENABLED=0 GOOS=openbsd GOARCH=${{ matrix.goarch }} go test -c -o wg.test ./internal/wg
+      - uses: vmactions/openbsd-vm@v1
+        with:
+          release: ${{ matrix.release }}
+          envs: 'CW_REQUIRE_OPENBSD'
+          run: |
+            uname -a
+            id -u
+            CW_REQUIRE_OPENBSD=1 ./wg.test -test.v -test.count=1 -test.run 'TestIfreqMTUSize|TestSetInterfaceMTUOnARealLink'
+        env:
+          CW_REQUIRE_OPENBSD: '1'
+
   crossbuild:
     name: cross-build (${{ matrix.goarch }})
     runs-on: ubuntu-latest
@@ -150,7 +180,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        goos: [darwin, windows]
+        goos: [darwin, windows, openbsd]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
