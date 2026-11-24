@@ -1,10 +1,10 @@
-//go:build !linux
+//go:build !linux && !openbsd
 
 package wg
 
 import "errors"
 
-// SetInterfaceMTU is Linux only: the gateway runs on Linux.
+// SetInterfaceMTU is supported on Linux and OpenBSD only.
 func SetInterfaceMTU(string, int) error {
-	return errors.New("setting an interface MTU is only supported on Linux")
+	return errors.New("setting an interface MTU is only supported on Linux and OpenBSD")
 }
