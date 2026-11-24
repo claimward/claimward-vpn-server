@@ -1,9 +1,10 @@
 //go:build ignore
 
 // gen runs `go tool cgo -godefs defs.go` on THIS host, which must be OpenBSD,
-// and writes the formatted result to the path given as the only argument.
+// and writes ztypes_openbsd_<arch>.go into the directory given as the only
+// argument.
 //
-//	go run gen.go ../ztypes_openbsd_amd64.go
+//	go run gen.go ..
 //
 // The first line of the output records the release and architecture it was
 // generated for, so the CI lane can regenerate on each supported release and
@@ -16,6 +17,7 @@ import (
 	"go/format"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -42,7 +44,10 @@ func main() {
 	// The release is deliberately NOT written into the file: 7.9 and 8.0
 	// share one layout, and the lane proves it by regenerating on each and
 	// comparing the bytes with the committed file.
-	if err := os.WriteFile(os.Args[1], append(src, '\n'), 0o644); err != nil {
+	// The argument is a directory, not a file: `go run gen.go x.go` would
+	// take x.go for a second source file.
+	dest := filepath.Join(os.Args[1], "ztypes_openbsd_"+runtime.GOARCH+".go")
+	if err := os.WriteFile(dest, append(src, '\n'), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
