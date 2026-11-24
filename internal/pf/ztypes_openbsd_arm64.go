@@ -43,6 +43,7 @@ const (
 	PF_OP_RRG          = 0x9
 	PF_ADDR_ADDRMASK   = 0x0
 	PF_ADDR_TABLE      = 0x3
+	PF_ADDR_NONE       = 0x7
 	PF_STATE_NORMAL    = 0x1
 	PFSTATE_SCRUB_TCP  = 0x100
 	PF_PRIO_ZERO       = 0xff

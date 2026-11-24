@@ -144,6 +144,13 @@ func encodeRule(s Spec, anchor string, ticket uint32, rec func(member)) ([]byte,
 	}
 	w.put32(mRtableid, 0xffffffff) // -1: any routing table, as pfctl writes it
 	w.put32(mOnrdomain, 0xffffffff)
+	// No nat-to, rdr-to or route-to: pfctl writes PF_ADDR_NONE in the three
+	// pools. All-zero would be PF_ADDR_ADDRMASK, a pool the kernel acts on
+	// ("nat-to any rdr-to any"), which stopped the packet proof's allowed
+	// traffic from reaching its destination.
+	w.put8(mNatAddrType, PF_ADDR_NONE)
+	w.put8(mRdrAddrType, PF_ADDR_NONE)
+	w.put8(mRouteAddrType, PF_ADDR_NONE)
 	if s.MaxMSS != 0 {
 		// pfctl writes max_mss alone for "scrub (max-mss N)" and leaves
 		// scrub_flags 0 (measured against the oracle on 7.9 and 8.0).

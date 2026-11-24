@@ -49,6 +49,14 @@ var (
 	mRuleSetPrio = member{"pf_rule", "set_prio", OffRuleSetPrio, 2}
 	mRuleNaf     = member{"pf_rule", "naf", OffRuleNaf, 1}
 	mRuleLog     = member{"pf_rule", "log", OffRuleLog, 1}
+
+	// The address type of the three pools of a rule (nat-to, rdr-to, route-to).
+	// A pool whose type is not PF_ADDR_NONE is a nat/rdr/route the kernel acts
+	// on, so these MUST be written PF_ADDR_NONE. The offsets are the amd64/arm64
+	// ones (8-byte pointers); TestLayoutAgainstC compares them with C's offsetof.
+	mNatAddrType   = member{"pf_rule", "nat.addr.type", 0x270, 1}
+	mRdrAddrType   = member{"pf_rule", "rdr.addr.type", 0x2f8, 1}
+	mRouteAddrType = member{"pf_rule", "route.addr.type", 0x380, 1}
 )
 
 // Members of the structures the Go side declares from the generated types
@@ -96,6 +104,7 @@ var allMembers = []member{
 	mIfname, mRcvIfname, mMaxMSS, mScrubFlags, mRtableid, mOnrdomain, mSrc, mDst,
 	mIocAction, mIocTicket, mIocNr, mIocAnchor, mIocCall, mIocRule,
 	mRuleNr, mRulePrio, mRuleSetPrio, mRuleNaf, mRuleLog,
+	mNatAddrType, mRdrAddrType, mRouteAddrType,
 	mAddrWrapV, mAddrWrapType, mRAAddr, mRAPort, mRANeg, mRAPortOp,
 	mTblAnchor, mTblName, mTblFlags, mAddrU, mAddrAf, mAddrNet, mAddrNot,
 	mTioTable, mTioBuffer, mTioEsize, mTioSize, mTioNadd, mTioFlags, mTioTicket,

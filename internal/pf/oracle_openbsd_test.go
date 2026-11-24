@@ -92,11 +92,14 @@ func kernelOwned() [][2]int {
 		// every ruleset change; userland never sets them. Measured 7.9 and 8.0.
 		{OffRuleSkip, OffRuleSkip + 0x88},
 		// Measured, identical on 7.9 and 8.0 for every rule of the corpus: pfctl
-		// writes 7 at the start of each of the three pf_pool of a rule
-		// (nat, rdr, route: the round-robin default) and 30 in the 4 bytes
-		// before `evaluations`. A rule with no nat/rdr/route/pktrate never
-		// reads them, and the kernel accepted our zeros.
-		{0x270, 0x271}, {0x2f8, 0x2f9}, {0x380, 0x381},
+		// writes 30 in the 4 bytes before `evaluations` (pktrate.seconds).
+		// pktrate.limit is 0, so no packet rate applies and it is never read.
+		//
+		// The 7 pfctl writes at the start of each of the three pf_pool (nat,
+		// rdr, route) is PF_ADDR_NONE, NOT kernel-owned: this list used to mask
+		// it, the encoder wrote 0 (PF_ADDR_ADDRMASK), and the kernel then read a
+		// "nat-to any rdr-to any" in every rule (pfctl -sr printed it) and the
+		// packet proof's allowed traffic never arrived. They are compared now.
 		{OffRuleEvaluations - 4, OffRuleEvaluations},
 	}
 	for _, base := range []int{OffRuleSrc, OffRuleDst} {

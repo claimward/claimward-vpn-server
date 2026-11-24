@@ -60,7 +60,10 @@ func packetLab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []string{"pair0", "pair1", "pair2", "pair3", "lo1", "lo2"} {
+	// The loopbacks of the routing domains are created first, so that the
+	// cleanup (last in, first out) destroys them last: a domain's lo(4) cannot
+	// go while an interface is still in the domain.
+	for _, n := range []string{"lo1", "lo2", "pair0", "pair1", "pair2", "pair3"} {
 		if exec.Command("ifconfig", n).Run() == nil {
 			t.Fatalf("%s exists already; the lab needs its own interfaces", n)
 		}
@@ -195,6 +198,16 @@ func TestPacketsAreDroppedAndPassedAsThePolicySays(t *testing.T) {
 		t.Fatal(err)
 	}
 	const wait = 2 * time.Second
+
+	// No rule may carry a translation or a route: a pool left at the wrong
+	// address type reads as "nat-to any rdr-to any".
+	for _, l := range strings.Split(pfctl(t, "", "-a", AnchorName, "-sr"), "\n") {
+		for _, bad := range []string{"nat-to", "rdr-to", "route-to", "reply-to", "dup-to"} {
+			if strings.Contains(l, bad) {
+				t.Errorf("rule with %s: %s", bad, l)
+			}
+		}
+	}
 
 	// Control: the lab itself works, which a policy that blocks everything
 	// would hide. With the anchor emptied there is no filter.
