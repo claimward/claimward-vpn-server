@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 )
 
@@ -81,6 +82,66 @@ type peerOp struct {
 	Public [wgKeyLen]byte
 	Remove bool
 	AIPs   []netip.Prefix
+}
+
+// maxReadBytes bounds the buffer a SIOCGWG read may grow to: the kernel says how
+// much it needs, and that figure is a request, not something to allocate blindly.
+const maxReadBytes = 1 << 20
+
+const afInet6 = 24 // OpenBSD's AF_INET6
+
+// decodeGet reads what SIOCGWG wrote (wg_ioctl_get, if_wg.c 2466-2566): the
+// interface header, then each peer header followed by its allowed addresses
+// (the kernel writes them at p_aips), the same layout as the set buffer. Every
+// count is checked against the bytes that are there before it is trusted.
+//
+// wgctrl's OpenBSD driver reads this buffer too, and on the CI VMs it returned a
+// peer without its addresses and a second peer of zeros, which is why the
+// gateway reads with this decoder instead.
+func decodeGet(l ioLayout, buf []byte) ([]Peer, error) {
+	if len(buf) < l.IfaceSize {
+		return nil, fmt.Errorf("wg: read: %d bytes, less than the %d of the header", len(buf), l.IfaceSize)
+	}
+	n := binary.NativeEndian.Uint64(buf[l.IfacePeersCount:])
+	off := l.IfaceSize
+	if n > uint64(len(buf)-off)/uint64(l.PeerSize) {
+		return nil, fmt.Errorf("wg: read: %d peers cannot fit in %d bytes", n, len(buf))
+	}
+	out := make([]Peer, 0, n)
+	for i := uint64(0); i < n; i++ {
+		if len(buf)-off < l.PeerSize {
+			return nil, fmt.Errorf("wg: read: peer %d header past the end", i)
+		}
+		peer := buf[off : off+l.PeerSize]
+		off += l.PeerSize
+		var p Peer
+		copy(p.PublicKey[:], peer[l.PeerPublic:l.PeerPublic+wgKeyLen])
+		an := binary.NativeEndian.Uint64(peer[l.PeerAipsCount:])
+		if an > uint64(len(buf)-off)/uint64(l.AipSize) {
+			return nil, fmt.Errorf("wg: read: peer %d claims %d addresses past the end", i, an)
+		}
+		for j := uint64(0); j < an; j++ {
+			aip := buf[off : off+l.AipSize]
+			off += l.AipSize
+			cidr := int(binary.NativeEndian.Uint32(aip[l.AipCidr:]))
+			switch aip[l.AipAf] {
+			case afInet:
+				if cidr > 32 {
+					return nil, fmt.Errorf("wg: read: cidr %d on an IPv4 address", cidr)
+				}
+				p.AllowedIPs = append(p.AllowedIPs, net.IPNet{IP: net.IP(append([]byte(nil), aip[l.AipAddr:l.AipAddr+4]...)), Mask: net.CIDRMask(cidr, 32)})
+			case afInet6:
+				if cidr > 128 {
+					return nil, fmt.Errorf("wg: read: cidr %d on an IPv6 address", cidr)
+				}
+				p.AllowedIPs = append(p.AllowedIPs, net.IPNet{IP: net.IP(append([]byte(nil), aip[l.AipAddr:l.AipAddr+16]...)), Mask: net.CIDRMask(cidr, 128)})
+			default:
+				return nil, fmt.Errorf("wg: read: address family %d", aip[l.AipAf])
+			}
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 // encodeSet is the buffer wgd_interface points at: an interface header with no

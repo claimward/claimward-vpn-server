@@ -31,6 +31,43 @@ type ioctlWriter struct{ device string }
 
 func newPeerWriter(_ *wgctrl.Client, device string) peerWriter { return ioctlWriter{device: device} }
 
+// peers reads the device with SIOCGWG. The kernel answers with the size it
+// needs when the buffer is short, so the read grows and retries, within
+// maxReadBytes; peers added meanwhile make it retry again, a few times at most.
+func (w ioctlWriter) peers() ([]Peer, error) {
+	if len(w.device) == 0 || len(w.device) >= unix.IFNAMSIZ {
+		return nil, fmt.Errorf("wg: bad interface name %q", w.device)
+	}
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("wg: %w", err)
+	}
+	defer unix.Close(fd)
+	size := hostLayout.IfaceSize + 16*hostLayout.PeerSize
+	for try := 0; try < 4; try++ {
+		buf := make([]byte, size)
+		var req dataIO
+		copy(req.Name[:], w.device)
+		req.Size = uintptr(len(buf))
+		req.Iface = &buf[0]
+		_, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(SIOCGWG), uintptr(unsafe.Pointer(&req)))
+		runtime.KeepAlive(buf)
+		if e != 0 {
+			return nil, fmt.Errorf("wg: SIOCGWG on %s: %w", w.device, e)
+		}
+		need := int(req.Size)
+		if need > maxReadBytes || need < hostLayout.IfaceSize {
+			return nil, fmt.Errorf("wg: SIOCGWG on %s asks for %d bytes", w.device, need)
+		}
+		if need > len(buf) {
+			size = need
+			continue
+		}
+		return decodeGet(hostLayout, buf[:need])
+	}
+	return nil, fmt.Errorf("wg: SIOCGWG on %s: the device kept changing", w.device)
+}
+
 func (w ioctlWriter) setPeers(ops []peerOp) error {
 	if len(w.device) == 0 || len(w.device) >= unix.IFNAMSIZ {
 		return fmt.Errorf("wg: bad interface name %q", w.device)

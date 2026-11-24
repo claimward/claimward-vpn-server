@@ -3,6 +3,7 @@ package wg
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
 	"net/netip"
 	"reflect"
 	"strings"
@@ -154,6 +155,111 @@ func TestEncodeRefusals(t *testing.T) {
 	if _, err := encodeSet(layout64, make([]peerOp, maxPeerOps)); err != nil {
 		t.Errorf("%d peers refused: %v", maxPeerOps, err)
 	}
+}
+
+// getBuf lays out what SIOCGWG writes: header, then per peer its header and its
+// addresses (each given as family, cidr, address bytes).
+func getBuf(peers []Peer, fams [][]byte) []byte {
+	l := layout64
+	buf := make([]byte, l.IfaceSize)
+	binary.NativeEndian.PutUint64(buf[l.IfacePeersCount:], uint64(len(peers)))
+	for i, p := range peers {
+		ph := make([]byte, l.PeerSize)
+		copy(ph[l.PeerPublic:], p.PublicKey[:])
+		binary.NativeEndian.PutUint64(ph[l.PeerAipsCount:], uint64(len(p.AllowedIPs)))
+		buf = append(buf, ph...)
+		for j, n := range p.AllowedIPs {
+			a := make([]byte, l.AipSize)
+			a[l.AipAf] = fams[i][j]
+			ones, _ := n.Mask.Size()
+			binary.NativeEndian.PutUint32(a[l.AipCidr:], uint32(ones))
+			copy(a[l.AipAddr:], n.IP)
+			buf = append(buf, a...)
+		}
+	}
+	return buf
+}
+
+func TestDecodeGet(t *testing.T) {
+	_, n4, _ := net.ParseCIDR("10.80.0.5/32")
+	_, n6, _ := net.ParseCIDR("fd00::/64")
+	in := []Peer{{PublicKey: key(1), AllowedIPs: []net.IPNet{*n4}}, {PublicKey: key(7), AllowedIPs: []net.IPNet{*n6, *n4}}, {PublicKey: key(9)}}
+	out, err := decodeGet(layout64, getBuf(in, [][]byte{{afInet}, {afInet6, afInet}, nil}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 3 || out[1].PublicKey != in[1].PublicKey || len(out[0].AllowedIPs) != 1 || len(out[1].AllowedIPs) != 2 || len(out[2].AllowedIPs) != 0 {
+		t.Fatalf("decoded %+v", out)
+	}
+	if out[0].AllowedIPs[0].String() != "10.80.0.5/32" || out[1].AllowedIPs[0].String() != "fd00::/64" || out[1].AllowedIPs[1].String() != "10.80.0.5/32" {
+		t.Errorf("addresses: %v %v", out[0].AllowedIPs, out[1].AllowedIPs)
+	}
+}
+
+func TestDecodeGetRefusals(t *testing.T) {
+	_, n4, _ := net.ParseCIDR("10.80.0.5/32")
+	one := []Peer{{PublicKey: key(1), AllowedIPs: []net.IPNet{*n4}}}
+	good := getBuf(one, [][]byte{{afInet}})
+	l := layout64
+	bad := func(f func(b []byte)) []byte {
+		b := append([]byte(nil), good...)
+		f(b)
+		return b
+	}
+	cases := []struct {
+		name string
+		buf  []byte
+		want string
+	}{
+		{"short header", good[:l.IfaceSize-1], "less than"},
+		{"peers past the end", bad(func(b []byte) { binary.NativeEndian.PutUint64(b[l.IfacePeersCount:], 2) }), "cannot fit"},
+		{"huge peer count", bad(func(b []byte) { binary.NativeEndian.PutUint64(b[l.IfacePeersCount:], 1<<62) }), "cannot fit"},
+		{"addresses past the end", bad(func(b []byte) { binary.NativeEndian.PutUint64(b[l.IfaceSize+l.PeerAipsCount:], 2) }), "past the end"},
+		{"truncated address", good[:len(good)-1], "past the end"},
+		{"unknown family", bad(func(b []byte) { b[l.IfaceSize+l.PeerSize+l.AipAf] = 99 }), "family"},
+		{"cidr 33", bad(func(b []byte) { binary.NativeEndian.PutUint32(b[l.IfaceSize+l.PeerSize+l.AipCidr:], 33) }), "cidr"},
+		{"cidr 129", bad(func(b []byte) {
+			b[l.IfaceSize+l.PeerSize+l.AipAf] = afInet6
+			binary.NativeEndian.PutUint32(b[l.IfaceSize+l.PeerSize+l.AipCidr:], 129)
+		}), "cidr"},
+	}
+	for _, c := range cases {
+		out, err := decodeGet(l, c.buf)
+		if err == nil || !strings.Contains(err.Error(), c.want) || out != nil {
+			t.Errorf("%s: got %v, %v; want an error with %q", c.name, out, err, c.want)
+		}
+	}
+	// The boundary itself decodes: /32 on IPv4 and /128 on IPv6.
+	if _, err := decodeGet(l, good); err != nil {
+		t.Errorf("good buffer refused: %v", err)
+	}
+	b6 := bad(func(b []byte) {
+		b[l.IfaceSize+l.PeerSize+l.AipAf] = afInet6
+		binary.NativeEndian.PutUint32(b[l.IfaceSize+l.PeerSize+l.AipCidr:], 128)
+	})
+	if _, err := decodeGet(l, b6); err != nil {
+		t.Errorf("/128 refused: %v", err)
+	}
+}
+
+// FuzzDecodeGet: the kernel's answer is untrusted bytes to the decoder; whatever
+// they say, it returns peers or an error, and never more peers than bytes.
+func FuzzDecodeGet(f *testing.F) {
+	_, n4, _ := net.ParseCIDR("10.80.0.5/32")
+	f.Add(getBuf([]Peer{{PublicKey: key(1), AllowedIPs: []net.IPNet{*n4}}}, [][]byte{{afInet}}))
+	f.Add([]byte{})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		out, err := decodeGet(layout64, data)
+		if err != nil {
+			if out != nil {
+				t.Fatalf("an error and %d peers", len(out))
+			}
+			return
+		}
+		if len(out)*layout64.PeerSize > len(data) {
+			t.Fatalf("%d peers from %d bytes", len(out), len(data))
+		}
+	})
 }
 
 // FuzzEncodeSet: whatever the shape asked for, the encoder either refuses or

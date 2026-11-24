@@ -15,6 +15,8 @@ type fakeWriter struct {
 	err   error
 }
 
+func (f *fakeWriter) peers() ([]Peer, error) { return nil, f.err }
+
 func (f *fakeWriter) setPeers(ops []peerOp) error {
 	f.calls = append(f.calls, ops)
 	return f.err

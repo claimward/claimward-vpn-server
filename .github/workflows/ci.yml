@@ -304,7 +304,7 @@ jobs:
             # WireGuard peers through SIOCSWG (wgctrl's OpenBSD driver is
             # read-only): the structure layout against the release's own
             # <net/if_wg.h>, then add / replace / remove / sweep on a real wg(4).
-            CW_REQUIRE_OPENBSD=1 ./wg.test -test.v -test.count=1 -test.run 'TestWGLayoutTableIsTheGeneratedOne|TestWGLayoutAgainstC|TestPeersOnARealWireGuardInterface|TestEncodeAddWithAllowedIPs|TestEncodeRemove|TestEncodeRefusals|FuzzEncodeSet'
+            CW_REQUIRE_OPENBSD=1 ./wg.test -test.v -test.count=1 -test.run 'TestWGLayoutTableIsTheGeneratedOne|TestWGLayoutAgainstC|TestPeersOnARealWireGuardInterface|TestEncodeAddWithAllowedIPs|TestEncodeRemove|TestEncodeRefusals|FuzzEncodeSet|TestDecodeGet|TestDecodeGetRefusals|FuzzDecodeGet'
             # The pf applier against the real kernel: struct layout vs the
             # release's own header, ioctl load + read-back, pfctl as oracle.
             CW_REQUIRE_OPENBSD=1 ./pf.test -test.v -test.count=1

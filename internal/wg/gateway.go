@@ -58,9 +58,22 @@ func (w wgctrlWriter) setPeers(ops []peerOp) error {
 	return w.client.ConfigureDevice(w.device, cfg)
 }
 
-// peerWriter applies peer changes to the device the gateway manages.
+func (w wgctrlWriter) peers() ([]Peer, error) {
+	d, err := w.client.Device(w.device)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Peer, 0, len(d.Peers))
+	for _, p := range d.Peers {
+		out = append(out, Peer{PublicKey: p.PublicKey, AllowedIPs: p.AllowedIPs})
+	}
+	return out, nil
+}
+
+// peerWriter reads and changes the peers of the device the gateway manages.
 type peerWriter interface {
 	setPeers(ops []peerOp) error
+	peers() ([]Peer, error)
 }
 
 // NewGateway opens a wgctrl client and verifies the device exists.
