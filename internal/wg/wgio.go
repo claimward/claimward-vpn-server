@@ -132,8 +132,8 @@ func encodeSet(l ioLayout, ops []peerOp) ([]byte, error) {
 			aip := buf[off : off+l.AipSize]
 			aip[l.AipAf] = afInet
 			binary.NativeEndian.PutUint32(aip[l.AipCidr:], uint32(p.Bits()))
-			a := p.Addr().As4()
-			copy(aip[l.AipAddr:], a[:])
+			a := p.Addr().AsSlice() // not As4: a missing guard must fail an assertion, not panic
+			copy(aip[l.AipAddr:l.AipAddr+4], a)
 			off += l.AipSize
 		}
 	}
