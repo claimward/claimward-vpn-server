@@ -49,7 +49,7 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       # Sign the digest, never a tag: a tag can move.
       - run: cosign sign --yes "${IMAGE}@${{ steps.build.outputs.digest }}"
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}
