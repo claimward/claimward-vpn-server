@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -30,6 +31,14 @@ type Gateway interface {
 type wgctrlGateway struct {
 	client *wgctrl.Client
 	device string
+	// w, when set, writes the peers instead of wgctrl: OpenBSD's wgctrl driver
+	// can read a device but not configure one. Reads still go through wgctrl.
+	w peerWriter
+}
+
+// peerWriter applies peer changes to the device the gateway manages.
+type peerWriter interface {
+	setPeers(ops []peerOp) error
 }
 
 // NewGateway opens a wgctrl client and verifies the device exists.
@@ -42,10 +51,20 @@ func NewGateway(device string) (Gateway, error) {
 		c.Close()
 		return nil, fmt.Errorf("wireguard device %q not found (create it with wg-quick first): %w", device, err)
 	}
-	return &wgctrlGateway{client: c, device: device}, nil
+	return &wgctrlGateway{client: c, device: device, w: newPeerWriter(device)}, nil
 }
 
 func (g *wgctrlGateway) AddPeer(pub wgtypes.Key, ip net.IP) error {
+	if g.w != nil {
+		a, ok := netip.AddrFromSlice(ip)
+		if !ok || !a.Unmap().Is4() {
+			return fmt.Errorf("add peer: %v is not an IPv4 address", ip)
+		}
+		if err := g.w.setPeers([]peerOp{{Public: pub, AIPs: []netip.Prefix{netip.PrefixFrom(a.Unmap(), 32)}}}); err != nil {
+			return fmt.Errorf("add peer: %w", err)
+		}
+		return nil
+	}
 	allowed := net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}
 	cfg := wgtypes.Config{
 		Peers: []wgtypes.PeerConfig{{
@@ -61,6 +80,12 @@ func (g *wgctrlGateway) AddPeer(pub wgtypes.Key, ip net.IP) error {
 }
 
 func (g *wgctrlGateway) RemovePeer(pub wgtypes.Key) error {
+	if g.w != nil {
+		if err := g.w.setPeers([]peerOp{{Public: pub, Remove: true}}); err != nil {
+			return fmt.Errorf("remove peer: %w", err)
+		}
+		return nil
+	}
 	cfg := wgtypes.Config{
 		Peers: []wgtypes.PeerConfig{{PublicKey: pub, Remove: true}},
 	}

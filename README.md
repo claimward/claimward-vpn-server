@@ -9,8 +9,9 @@ Designed to run co-located on the gateway host, Linux (nftables) or, from
 v0.10.0, OpenBSD (pf, see [OpenBSD](#openbsd-pf-from-v0100)): it manages *peers* on an
 existing `wg0` interface via `wgctrl` (the interface itself is created by
 wg-quick/systemd at boot). On OpenBSD the `wgctrl` driver can read a device
-but not configure it, so peers cannot be added there yet; the pf policy,
-the MTU and the privilege separation work.
+but not configure it, so the gateway writes peers itself with the `SIOCSWG`
+ioctl (as `ifconfig(8)` does), from v0.11.0: enrolment works there, with the pf
+policy, the MTU and the privilege separation.
 
 ## Endpoints
 
@@ -268,6 +269,17 @@ fail closed.
   not start, and there is no flag to disable it. A compromised child can still
   change the policy of the peers in the pool; it cannot reach the rest of the
   host. Linux and `WG_DRYRUN` stay one process. Ports must be above 1024.
+- **WireGuard peers, from v0.11.0.** wgctrl's OpenBSD driver can read a device
+  but ConfigureDevice returns "driver is read-only", so `internal/wg` writes
+  peers with `SIOCSWG` and `struct wg_data_io` (`<net/if_wg.h>`, as
+  `ifconfig(8)` does), in the root parent: add a peer with its `/32`, replace
+  its address, remove it. The kernel never reads `wgd_size`, so the encoder
+  bounds every count (at most 8 peers and 16 addresses per call, IPv4 only)
+  before the ioctl. The structure layout is generated from the release's own
+  header (`internal/wg/abigen`, compared on 7.9 and 8.0 by the `pf ABI` lane) and
+  checked against a C compiler; the `openbsd` lane adds, replaces, removes and
+  sweeps peers on a real `wg(4)`, and enrols a device through the rc.d service.
+  Before v0.11.0 every OpenBSD enrolment ended in a gateway error.
 - **Table names** carry a per-load generation suffix, so the short window between
   the table commit and the rule commit never applies one tenant's rules to
   another tenant's peers.
