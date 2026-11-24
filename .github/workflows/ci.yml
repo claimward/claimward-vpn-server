@@ -235,14 +235,18 @@ jobs:
       - name: control, a credential file that is not safe is refused
         run: |
           set -eu
-          d="$RUNNER_TEMP/badcreds"
-          mkdir "$d"
-          sudo sh -c "wg genkey > $d/wg-private-key && chown claimward $d/wg-private-key && chmod 0644 $d/wg-private-key && chmod 0755 $d"
+          # Under /etc: the service user must be able to reach the file, so the
+          # refusal is about the mode, not about a directory it cannot enter.
+          d=/etc/claimward/badcreds
+          sudo install -d -m 0755 "$d"
+          sudo sh -c "wg genkey > $d/wg-private-key && chown claimward $d/wg-private-key && chmod 0644 $d/wg-private-key"
+          test "$(stat -c %a $d/wg-private-key)" = 644
           if sudo -u claimward env CREDENTIALS_DIRECTORY="$d" WG_DRYRUN=true WG_ENDPOINT=x:1 AUTH_PROVIDER=github GITHUB_ALLOWED_ORGS=x /usr/local/bin/claimward-server > bad.txt 2>&1; then
             cat bad.txt; exit 1
           fi
           cat bad.txt
-          grep -qi 'refused' bad.txt
+          grep -q 'has mode 0644' bad.txt
+          grep -q 'refused' bad.txt
       - name: stopping the service takes the credentials away
         run: |
           set -eu
