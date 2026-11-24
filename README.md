@@ -233,6 +233,37 @@ allowed and denied flow. It needs root: it is skipped, with the reason printed,
 elsewhere, and the privileged CI lane sets `CW_REQUIRE_NETNS=1` so that it can
 not be skipped there.
 
+### OpenBSD (pf), from v0.10.0
+
+On OpenBSD the same policy is enforced with pf, programmed directly through the
+`/dev/pf` ioctls (`internal/pf`); `pfctl` is never run and there is no fallback
+to it. The behaviour is the same as on Linux: default deny on `WG_INTERFACE`,
+IPv4 only (IPv6 across the tunnel is dropped), MSS clamping for both families,
+fail closed.
+
+- **Supported releases: 7.9 and 8.0** (they share one `struct pf_rule` layout).
+  Any other release, and a layout that does not match the release's own
+  `<net/pfvar.h>`, makes the server refuse to start.
+- **You own `pf.conf`.** The server never edits the main ruleset: add
+  `anchor "claimward"` to `/etc/pf.conf` and keep pf enabled. The policy is
+  loaded into that anchor, in one pf transaction, and read back.
+- **Refusals at start:** not root (`/dev/pf` is opened read-write), pf disabled,
+  the main ruleset does not call `anchor "claimward"` (the policy would filter
+  nothing), `set skip on` covering the WireGuard interface (`wg0`, `wg*`).
+- **Table names** carry a per-load generation suffix, so the short window between
+  the table commit and the rule commit never applies one tenant's rules to
+  another tenant's peers.
+- **No `pledge(2)`.** The `pf` promise allows twelve `DIOC*` ioctls
+  (`sys/kern/kern_pledge.c`, `pledge_ioctl`); the server also needs
+  `DIOCRINADEFINE`, `DIOCXROLLBACK`, `DIOCGETRULES`, `DIOCGETRULE`, `DIOCXEND`
+  and `DIOCRGETADDRS`, and a pledge cannot be widened later.
+- **Tests.** The `openbsd` CI lane runs `internal/pf` as root in real 7.9 and 8.0
+  VMs: struct layout against the release's own header, load and read-back,
+  `pfctl` as an oracle for the encoding, and a packet proof (traffic across
+  pair(4) interfaces and routing domains is dropped or passed as the policy
+  says, and the SYN's MSS option is read with `tcpdump`: measured 1460 without the
+  clamp, 1350 with it, on a 1390 MTU, on 7.9 and 8.0).
+
 ## Credentials (v0.6.0)
 
 **Every secret is a file in a credentials directory, never an environment
