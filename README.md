@@ -315,10 +315,12 @@ measured on a cluster.
 and the server refuses to start while any is set (no fallback). Put each value
 in the file named above, unset the variable, and set `CREDENTIALS_DIRECTORY`.
 Tenants with `members` now also need `github-token`. Ready-made units are in
-[`deploy/`](deploy/README.md) (systemd, Compose, Podman Quadlet, Kubernetes).
-Hosts without systemd will be able to get the same directory from
-`go-authn/sdcreds` (`sdcreds s6-run`) once its v0.1.0 is tagged; this server
-does not depend on it.
+[`deploy/`](deploy/README.md) (systemd, Compose, Podman Quadlet, Kubernetes,
+s6). Hosts without systemd get the same directory from `go-authn/sdcreds`
+(`sdcreds s6-run --keep-cap=CAP_NET_ADMIN`, v0.2.0): the files are 0400 and
+owned by the service user, which the server accepts. See
+[`deploy/s6/`](deploy/s6/claimward-server/run); CI starts it under a real
+`s6-svscan` and checks `CapEff == 0x1000`. This server does not depend on it.
 
 ## Configuration (environment)
 
