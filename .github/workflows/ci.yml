@@ -158,9 +158,9 @@ jobs:
           printf '[Service]\nEnvironment=WG_DRYRUN=true\n' | sudo tee /etc/systemd/system/claimward-server.service.d/ci.conf >/dev/null
           sudo systemctl daemon-reload
           sudo systemctl start claimward-server
-          timeout 60 sh -c "until sudo journalctl -u claimward-server --no-pager | grep -qF 'server_pubkey=$pub'; do sleep 1; done"
+          timeout 60 sh -c "until sudo journalctl -u claimward-server --no-pager | grep -qF 'server_pubkey=\"$pub\"'; do sleep 1; done"
           # Control: a key we did not give it must not be in the journal.
-          if sudo journalctl -u claimward-server --no-pager | grep -qF "server_pubkey=$other"; then exit 1; fi
+          if sudo journalctl -u claimward-server --no-pager | grep -qF "$other"; then exit 1; fi
           test "$(systemctl show -p DynamicUser --value claimward-server)" = yes
           test "$(systemctl is-active claimward-server)" = active
           # The shape under test: root-owned, with a named-user ACL.
