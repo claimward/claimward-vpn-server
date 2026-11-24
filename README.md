@@ -8,7 +8,9 @@ pluggable identity provider — **GitHub** by default, any **OIDC** issuer, or a
 Designed to run co-located on the gateway host, Linux (nftables) or, from
 v0.10.0, OpenBSD (pf, see [OpenBSD](#openbsd-pf-from-v0100)): it manages *peers* on an
 existing `wg0` interface via `wgctrl` (the interface itself is created by
-wg-quick/systemd at boot).
+wg-quick/systemd at boot). On OpenBSD the `wgctrl` driver can read a device
+but not configure it, so peers cannot be added there yet; the pf policy,
+the MTU and the privilege separation work.
 
 ## Endpoints
 

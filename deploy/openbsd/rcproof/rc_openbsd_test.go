@@ -215,20 +215,22 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 	if got := strings.TrimSpace(must(t, "stat", "-f", "%Su %Mp%Lp", keyCred)); got != childUser+" 0400" {
 		t.Errorf("the key credential is %q, want %q", got, childUser+" 0400")
 	}
+	// ps(1) cuts a user name to 8 characters, so the accounts are compared by uid.
+	childUID := strings.TrimSpace(must(t, "id", "-u", childUser))
 	var child, parent int
-	for _, line := range strings.Split(must(t, "ps", "-ax", "-o", "user,args"), "\n") {
+	for _, line := range strings.Split(must(t, "ps", "-ax", "-o", "uid,args"), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 || f[1] != "/usr/local/bin/claimward-server" {
 			continue // not the server (the shell that started it has a longer command line)
 		}
 		switch {
 		case len(f) >= 3 && f[2] == "privsep-child":
-			if f[0] != childUser {
-				t.Errorf("the serving process runs as %q: %s", f[0], line)
+			if f[0] != childUID {
+				t.Errorf("the serving process runs as uid %q, want %s's %s: %s", f[0], childUser, childUID, line)
 			}
 			child++
 		case len(f) == 2:
-			if f[0] != "root" {
+			if f[0] != "0" {
 				t.Errorf("the privileged process runs as %q: %s", f[0], line)
 			}
 			parent++
@@ -256,14 +258,19 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
-	if code, body := enroll(devPub); code != http.StatusOK {
-		t.Fatalf("enroll: %d %s\nlog:\n%s", code, body, logSince(t, off))
+	// wgctrl's OpenBSD driver is read-only (ConfigureDevice returns a sentinel),
+	// so the parent cannot program a peer on OpenBSD yet: this is not new with
+	// privilege separation, and the enrolment is refused with a gateway error.
+	// What this lane can prove is that the request left the pledged child, was
+	// validated by the parent and reached its gateway.
+	if code, _ := enroll(devPub); code == http.StatusOK {
+		t.Errorf("enroll succeeded although wgctrl cannot configure wg0 on OpenBSD; update this test and the README")
 	}
-	if wgOut := must(t, "ifconfig", "wg0"); !strings.Contains(wgOut, devPub) {
-		t.Errorf("the enrolled peer never reached wg0:\n%s", wgOut)
+	if got := logSince(t, off); !strings.Contains(got, "privileged parent: add peer") {
+		t.Errorf("the child's peer request never reached the parent:\n%s", got)
 	}
 	// Negative control: a key the provider never registered is refused by the
-	// child, and does not reach wg0 either.
+	// child, and does not reach wg0.
 	other, _ := wgtypes.GeneratePrivateKey()
 	if code, _ := enroll(other.PublicKey().String()); code == http.StatusOK {
 		t.Errorf("an unregistered key enrolled")
@@ -274,10 +281,6 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 
 	if out, err := run(t, "rcctl", "stop", "claimward_server"); err != nil {
 		t.Fatalf("rcctl stop: %v\n%s", err, out)
-	}
-	// Stopping removed the peers this run added.
-	if wgOut := must(t, "ifconfig", "wg0"); strings.Contains(wgOut, devPub) {
-		t.Errorf("the peer outlived the server:\n%s", wgOut)
 	}
 	if out, err := run(t, "rcctl", "check", "claimward_server"); err == nil {
 		t.Fatalf("rcctl check passes after stop:\n%s", out)
