@@ -206,7 +206,7 @@ jobs:
   # what BOTH supported releases generate (7.9 and 8.0 share one layout): a
   # release that drifts fails here before the gateway can mis-encode a rule.
   pfabi:
-    name: pf ABI ${{ matrix.release }}
+    name: pf ABI ${{ matrix.release }} (${{ matrix.goarch }})
     # A self-hosted pool must never execute fork code: same-repo PRs and pushes only.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -214,11 +214,18 @@ jobs:
       fail-fast: false
       matrix:
         release: ['7.9', '8.0']
+        goarch: [amd64, arm64]
+        include:
+          - goarch: amd64
+            vmarch: x86_64
+          - goarch: arm64
+            vmarch: aarch64
     steps:
       - uses: actions/checkout@v7
       - uses: vmactions/openbsd-vm@v1
         with:
           release: ${{ matrix.release }}
+          arch: ${{ matrix.vmarch }}
           prepare: pkg_add go
           run: |
             uname -a
@@ -229,9 +236,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ztypes-${{ matrix.release }}
+          name: ztypes-${{ matrix.release }}-${{ matrix.goarch }}
           path: internal/pf/gen/
-      - run: diff -u internal/pf/ztypes_openbsd_amd64.go internal/pf/gen/ztypes_openbsd_amd64.go
+      - run: diff -u internal/pf/ztypes_openbsd_${{ matrix.goarch }}.go internal/pf/gen/ztypes_openbsd_${{ matrix.goarch }}.go
 
   crossbuild:
     name: cross-build (${{ matrix.goarch }})

@@ -47,6 +47,14 @@ enum {
 	OffRuleEvaluations = PFR_OFF(evaluations),
 	OffRulePktrate    = PFR_OFF(pktrate),
 	OffRuleEntries    = PFR_OFF(entries),
+	OffRulePrio       = PFR_OFF(prio),
+	OffRuleSetPrio    = PFR_OFF(set_prio),
+	OffRuleNaf        = PFR_OFF(naf),
+	OffRuleLog        = PFR_OFF(log),
+	OffRuleRuleFlag   = PFR_OFF(rule_flag),
+	OffRuleAnchorRelative = PFR_OFF(anchor_relative),
+	OffRuleAnchorWildcard = PFR_OFF(anchor_wildcard),
+	OffRuleFlush      = PFR_OFF(flush),
 	OffIocAction      = PFI_OFF(action),
 	OffIocTicket      = PFI_OFF(ticket),
 	OffIocNr          = PFI_OFF(nr),
@@ -89,6 +97,19 @@ const (
 	PF_TRANS_TABLE     = C.PF_TRANS_TABLE
 	PFR_FLAG_ADDRSTOO  = C.PFR_FLAG_ADDRSTOO
 	PF_TABLE_NAME_SIZE = C.PF_TABLE_NAME_SIZE
+	PF_PASS            = C.PF_PASS
+	PF_DROP            = C.PF_DROP
+	PF_MATCH           = C.PF_MATCH
+	PF_IN              = C.PF_IN
+	PF_OP_EQ           = C.PF_OP_EQ
+	PF_OP_RRG          = C.PF_OP_RRG
+	PF_ADDR_ADDRMASK   = C.PF_ADDR_ADDRMASK
+	PF_ADDR_TABLE      = C.PF_ADDR_TABLE
+	PF_STATE_NORMAL    = C.PF_STATE_NORMAL
+	PFSTATE_SCRUB_TCP  = C.PFSTATE_SCRUB_TCP
+	PF_PRIO_ZERO       = C.PF_PRIO_ZERO
+	TH_SYN             = C.TH_SYN
+	TH_ACK             = C.TH_ACK
 )
 
 const (
@@ -117,6 +138,14 @@ const (
 	OffRuleEvaluations = C.OffRuleEvaluations
 	OffRulePktrate     = C.OffRulePktrate
 	OffRuleEntries     = C.OffRuleEntries
+	OffRulePrio           = C.OffRulePrio
+	OffRuleSetPrio        = C.OffRuleSetPrio
+	OffRuleNaf            = C.OffRuleNaf
+	OffRuleLog            = C.OffRuleLog
+	OffRuleRuleFlag       = C.OffRuleRuleFlag
+	OffRuleAnchorRelative = C.OffRuleAnchorRelative
+	OffRuleAnchorWildcard = C.OffRuleAnchorWildcard
+	OffRuleFlush          = C.OffRuleFlush
 	OffIocAction       = C.OffIocAction
 	OffIocTicket       = C.OffIocTicket
 	OffIocNr           = C.OffIocNr
