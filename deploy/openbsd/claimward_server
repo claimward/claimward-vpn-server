@@ -39,12 +39,17 @@ rc_configtest() {
 }
 
 rc_pre() {
-	rc_configtest || return 1
-	set -a
-	. /etc/claimward/environment
-	set +a
-	CREDENTIALS_DIRECTORY=/etc/claimward/credentials
-	export CREDENTIALS_DIRECTORY
+	rc_configtest
+}
+
+# rc.subr runs the daemon through `su -fl`, which resets the environment, so
+# the settings and CREDENTIALS_DIRECTORY are set INSIDE that shell. Secrets are
+# never in it: only the directory that holds them.
+rc_start() {
+	rc_exec "set -a; . /etc/claimward/environment; set +a; \
+		CREDENTIALS_DIRECTORY=/etc/claimward/credentials; \
+		export CREDENTIALS_DIRECTORY; \
+		${daemon} ${daemon_flags}"
 }
 
 rc_cmd $1
