@@ -258,16 +258,25 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
-	// wgctrl's OpenBSD driver is read-only (ConfigureDevice returns a sentinel),
-	// so the parent cannot program a peer on OpenBSD yet: this is not new with
-	// privilege separation, and the enrolment is refused with a gateway error.
-	// What this lane can prove is that the request left the pledged child, was
-	// validated by the parent and reached its gateway.
-	if code, _ := enroll(devPub); code == http.StatusOK {
-		t.Errorf("enroll succeeded although wgctrl cannot configure wg0 on OpenBSD; update this test and the README")
+	// wgctrl's OpenBSD driver is read-only, so the parent writes the peer
+	// itself, with the SIOCSWG ioctl (internal/wg, issue #79). The request
+	// leaves the pledged child, is validated by the parent, and the peer lands
+	// on wg0 with its address: ifconfig(8) is the oracle, independent of the
+	// writer.
+	code, body := enroll(devPub)
+	if code != http.StatusOK {
+		t.Fatalf("enroll answered %d, want 200: %s\nlog:\n%s", code, body, logSince(t, off))
 	}
-	if got := logSince(t, off); !strings.Contains(got, "privileged parent: add peer") {
-		t.Errorf("the child's peer request never reached the parent:\n%s", got)
+	var enrolled protocol.EnrollResponse
+	if err := json.Unmarshal([]byte(body), &enrolled); err != nil || enrolled.AssignedIP == "" {
+		t.Fatalf("enroll answer %q: %v", body, err)
+	}
+	wgOut := must(t, "ifconfig", "wg0")
+	if !strings.Contains(wgOut, devPub) {
+		t.Errorf("the enrolled key is not a peer of wg0:\n%s", wgOut)
+	}
+	if !strings.Contains(wgOut, enrolled.AssignedIP) {
+		t.Errorf("wg0 does not hold the assigned address %s:\n%s", enrolled.AssignedIP, wgOut)
 	}
 	// Negative control: a key the provider never registered is refused by the
 	// child, and does not reach wg0.
@@ -284,6 +293,11 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 	}
 	if out, err := run(t, "rcctl", "check", "claimward_server"); err == nil {
 		t.Fatalf("rcctl check passes after stop:\n%s", out)
+	}
+	// The stop removed the peer this run added: the parent's teardown went
+	// through the same writer.
+	if wgOut := must(t, "ifconfig", "wg0"); strings.Contains(wgOut, devPub) {
+		t.Errorf("the enrolled peer outlived the server:\n%s", wgOut)
 	}
 
 	// 1b. Negative control: a secret the unprivileged account does not own is

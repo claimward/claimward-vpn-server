@@ -62,13 +62,5 @@ func ours(p Peer, pool *net.IPNet) bool {
 }
 
 func (g *wgctrlGateway) Peers() ([]Peer, error) {
-	d, err := g.client.Device(g.device)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Peer, 0, len(d.Peers))
-	for _, p := range d.Peers {
-		out = append(out, Peer{PublicKey: p.PublicKey, AllowedIPs: p.AllowedIPs})
-	}
-	return out, nil
+	return g.w.peers()
 }

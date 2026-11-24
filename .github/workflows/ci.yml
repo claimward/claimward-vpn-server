@@ -301,6 +301,10 @@ jobs:
             # not own, and the start that must fail when pf.conf lacks the anchor.
             CW_REQUIRE_OPENBSD=1 CW_SERVER_BIN="$PWD/claimward-server" CW_DEPLOY_DIR="$PWD/deploy/openbsd" ./rcproof.test -test.v -test.count=1
             CW_REQUIRE_OPENBSD=1 ./wg.test -test.v -test.count=1 -test.run 'TestIfreqMTUSize|TestSetInterfaceMTUOnARealLink'
+            # WireGuard peers through SIOCSWG (wgctrl's OpenBSD driver is
+            # read-only): the structure layout against the release's own
+            # <net/if_wg.h>, then add / replace / remove / sweep on a real wg(4).
+            CW_REQUIRE_OPENBSD=1 ./wg.test -test.v -test.count=1 -test.run 'TestWGLayoutTableIsTheGeneratedOne|TestWGLayoutAgainstC|TestPeersOnARealWireGuardInterface|TestEncodeAddWithAllowedIPs|TestEncodeRemove|TestEncodeRefusals|FuzzEncodeSet|TestDecodeGet|TestDecodeGetRefusals|FuzzDecodeGet'
             # The pf applier against the real kernel: struct layout vs the
             # release's own header, ioctl load + read-back, pfctl as oracle.
             CW_REQUIRE_OPENBSD=1 ./pf.test -test.v -test.count=1
@@ -339,12 +343,19 @@ jobs:
             mkdir -p internal/pf/gen
             cd internal/pf/abigen
             GOTOOLCHAIN=local go run gen.go ../gen
+            # The WireGuard ioctl structures (SIOCSWG), same contract.
+            mkdir -p ../../wg/gen
+            cd ../../wg/abigen
+            GOTOOLCHAIN=local go run gen.go ../gen
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ztypes-${{ matrix.release }}-${{ matrix.goarch }}
-          path: internal/pf/gen/
+          path: |
+            internal/pf/gen/
+            internal/wg/gen/
       - run: diff -u internal/pf/ztypes_openbsd_${{ matrix.goarch }}.go internal/pf/gen/ztypes_openbsd_${{ matrix.goarch }}.go
+      - run: diff -u internal/wg/zwg_openbsd_${{ matrix.goarch }}.go internal/wg/gen/zwg_openbsd_${{ matrix.goarch }}.go
 
   crossbuild:
     name: cross-build (${{ matrix.goarch }})
