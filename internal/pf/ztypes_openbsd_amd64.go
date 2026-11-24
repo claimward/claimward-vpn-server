@@ -35,40 +35,66 @@ const (
 	PF_TRANS_TABLE     = 0x1
 	PFR_FLAG_ADDRSTOO  = 0x10
 	PF_TABLE_NAME_SIZE = 0x20
+	PF_PASS            = 0x0
+	PF_DROP            = 0x1
+	PF_MATCH           = 0xc
+	PF_IN              = 0x1
+	PF_OP_EQ           = 0x2
+	PF_OP_RRG          = 0x9
+	PF_ADDR_ADDRMASK   = 0x0
+	PF_ADDR_TABLE      = 0x3
+	PF_STATE_NORMAL    = 0x1
+	PFSTATE_SCRUB_TCP  = 0x100
+	PF_PRIO_ZERO       = 0xff
+	TH_SYN             = 0x2
+	TH_ACK             = 0x10
 )
 
 const (
-	OffRuleSrc         = 0x0
-	OffRuleDst         = 0x38
-	OffRuleSkip        = 0x70
-	OffRuleIfname      = 0xf8
-	OffRuleRcvIfname   = 0x108
-	OffRuleRtableid    = 0x43c
-	OffRuleOnrdomain   = 0x440
-	OffRuleNr          = 0x4c4
-	OffRuleCuid        = 0x4cc
-	OffRuleCpid        = 0x4d0
-	OffRuleMaxMSS      = 0x4d8
-	OffRuleScrubFlags  = 0x4de
-	OffRuleAction      = 0x500
-	OffRuleDirection   = 0x501
-	OffRuleQuick       = 0x504
-	OffRuleKeepState   = 0x507
-	OffRuleAf          = 0x508
-	OffRuleProto       = 0x509
-	OffRuleFlags       = 0x50e
-	OffRuleFlagset     = 0x50f
-	OffRuleTimeout     = 0x444
-	OffRuleExptime     = 0x548
-	OffRuleEvaluations = 0x3f0
-	OffRulePktrate     = 0x3e0
-	OffRuleEntries     = 0x238
-	OffIocAction       = 0x0
-	OffIocTicket       = 0x4
-	OffIocNr           = 0x8
-	OffIocAnchor       = 0xc
-	OffIocCall         = 0x40c
-	OffIocRule         = 0x810
+	OffRuleSrc            = 0x0
+	OffRuleDst            = 0x38
+	OffRuleSkip           = 0x70
+	OffRuleIfname         = 0xf8
+	OffRuleRcvIfname      = 0x108
+	OffRuleRtableid       = 0x43c
+	OffRuleOnrdomain      = 0x440
+	OffRuleNr             = 0x4c4
+	OffRuleCuid           = 0x4cc
+	OffRuleCpid           = 0x4d0
+	OffRuleMaxMSS         = 0x4d8
+	OffRuleScrubFlags     = 0x4de
+	OffRuleAction         = 0x500
+	OffRuleDirection      = 0x501
+	OffRuleQuick          = 0x504
+	OffRuleKeepState      = 0x507
+	OffRuleAf             = 0x508
+	OffRuleProto          = 0x509
+	OffRuleFlags          = 0x50e
+	OffRuleFlagset        = 0x50f
+	OffRuleTimeout        = 0x444
+	OffRuleExptime        = 0x548
+	OffRuleEvaluations    = 0x3f0
+	OffRulePktrate        = 0x3e0
+	OffRuleEntries        = 0x238
+	OffRulePrio           = 0x519
+	OffRuleSetPrio        = 0x51a
+	OffRuleNaf            = 0x51c
+	OffRuleLog            = 0x502
+	OffRuleRuleFlag       = 0x4fc
+	OffRuleAnchorRelative = 0x516
+	OffRuleAnchorWildcard = 0x517
+	OffRuleFlush          = 0x518
+	OffIocAction          = 0x0
+	OffIocTicket          = 0x4
+	OffIocNr              = 0x8
+	OffIocAnchor          = 0xc
+	OffIocCall            = 0x40c
+	OffIocRule            = 0x810
+	OffKifName            = 0x0
+	OffKifFlags           = 0xb8
+	SizeofPfiKif          = 0x100
+	DIOCIGETIFACES        = 0xc0284457
+	PFI_IFLAG_SKIP        = 0x100
 )
 
 type PfAddr struct {
@@ -155,4 +181,12 @@ type PfStatus struct {
 	Ifname              [16]int8
 	Pf_chksum           [16]uint8
 	Pad_cgo_0           [4]byte
+}
+type PfiocIface struct {
+	Name   [16]int8
+	Buffer *byte
+	Esize  int32
+	Size   int32
+	Nzero  int32
+	Flags  int32
 }
