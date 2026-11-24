@@ -117,7 +117,8 @@ func NewPlan(rs fw.Ruleset, gen uint32) (Plan, error) {
 		}
 	}
 
-	// Tables, in the order of rs.Sets.
+	// Tables, in the order of rs.Sets (referencedTables says which of them the
+	// kernel keeps).
 	names := map[string]string{}
 	addrs := 0
 	for _, s := range rs.Sets {
@@ -357,4 +358,23 @@ func validTableName(n string) error {
 		}
 	}
 	return nil
+}
+
+// referencedTables are the tables some rule names as its source. pf deletes a
+// table that no rule references when a ruleset is committed (measured on 8.0:
+// DIOCRGETADDRS answers ESRCH for one), so only these are loaded and read back.
+func (p Plan) referencedTables() []Table {
+	used := map[string]bool{}
+	for _, r := range p.Rules {
+		if r.SrcTable != "" {
+			used[r.SrcTable] = true
+		}
+	}
+	var out []Table
+	for _, t := range p.Tables {
+		if used[t.Name] {
+			out = append(out, t)
+		}
+	}
+	return out
 }

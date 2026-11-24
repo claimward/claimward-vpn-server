@@ -112,14 +112,18 @@ func TestApplyReplacesThePreviousLoad(t *testing.T) {
 	if err := a.Apply(fw.Build("wg0", []fw.Tenant{{ID: "only", Peers: []netip.Addr{netip.MustParseAddr("10.0.0.9")}}})); err != nil {
 		t.Fatal(err)
 	}
-	second := pfctl(t, "", "-a", AnchorName, "-sT")
+	// The second ruleset names no table: pf keeps none, and says so by exit
+	// status or an empty list.
+	secondOut, _ := exec.Command("pfctl", "-a", AnchorName, "-sT").CombinedOutput()
+	second := string(secondOut)
 	if first == second {
 		t.Fatalf("the table generation did not change:\n%s", second)
 	}
 	if strings.Contains(second, "t1_src_g") {
 		t.Errorf("a table of the first load survived:\n%s", second)
 	}
-	rules := pfctl(t, "", "-a", AnchorName, "-sr")
+	rulesOut, _ := exec.Command("pfctl", "-a", AnchorName, "-sr").CombinedOutput()
+	rules := string(rulesOut)
 	if strings.Contains(rules, "192.168.1.0/24") {
 		t.Errorf("a rule of the first load survived:\n%s", rules)
 	}

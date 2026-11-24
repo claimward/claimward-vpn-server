@@ -176,7 +176,7 @@ func load(fd int, p Plan) (err error) {
 		}
 	}()
 
-	for _, t := range p.Tables {
+	for _, t := range p.referencedTables() {
 		addrs := make([]PfrAddr, 0, len(t.Addrs)+1)
 		for _, a := range t.Addrs {
 			e, err := addrOf(a)
@@ -247,7 +247,7 @@ func verifyLoaded(fd int, p Plan) error {
 			return fmt.Errorf("pf: read-back of rule %d: %w", i, err)
 		}
 	}
-	for _, t := range p.Tables {
+	for _, t := range p.referencedTables() {
 		got, err := readTable(fd, AnchorName, t.Name, len(t.Addrs))
 		if err != nil {
 			return err

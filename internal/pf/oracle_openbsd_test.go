@@ -69,6 +69,10 @@ func pfctlLine(s Spec) string {
 	}
 	if s.SynOnly {
 		b.WriteString(" flags S/SA")
+	} else if s.Action == Pass && (s.Proto == 0 || s.Proto == protoTCP) {
+		// pfctl adds "flags S/SA" to such a rule on its own; the Spec means no
+		// flag test, so say so.
+		b.WriteString(" flags any")
 	}
 	if s.MaxMSS != 0 {
 		fmt.Fprintf(&b, " scrub (max-mss %d)", s.MaxMSS)
@@ -84,6 +88,16 @@ func kernelOwned() [][2]int {
 		{OffRuleNr, OffRuleNr + 4},
 		{OffRuleCuid, OffRuleCuid + 4},
 		{OffRuleCpid, OffRuleCpid + 4},
+		// skip[]: the kernel recomputes the skip steps (0xffffffff = none) on
+		// every ruleset change; userland never sets them. Measured 7.9 and 8.0.
+		{OffRuleSkip, OffRuleSkip + 0x88},
+		// Measured, identical on 7.9 and 8.0 for every rule of the corpus: pfctl
+		// writes 7 at the start of each of the three pf_pool of a rule
+		// (nat, rdr, route: the round-robin default) and 30 in the 4 bytes
+		// before `evaluations`. A rule with no nat/rdr/route/pktrate never
+		// reads them, and the kernel accepted our zeros.
+		{0x270, 0x271}, {0x2f8, 0x2f9}, {0x380, 0x381},
+		{OffRuleEvaluations - 4, OffRuleEvaluations},
 	}
 	for _, base := range []int{OffRuleSrc, OffRuleDst} {
 		r = append(r, [2]int{base + 32, base + 40}) // pf_addr_wrap.p: table entry count
