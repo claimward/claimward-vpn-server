@@ -1,0 +1,14 @@
+# Fragment for /etc/pf.conf. You own this file; the server never edits it.
+# It loads the per-peer policy into the anchor below, in one pf transaction,
+# and refuses to start if the anchor is not called or if `set skip on` covers
+# the WireGuard interface (wg0 or wg*).
+set skip on lo
+
+# The tunnel's default deny and every allow rule live INSIDE this anchor and
+# are `quick`, so their position relative to your own pass rules for wg0 does
+# not matter; keep your rules off wg0.
+anchor "claimward"
+
+# Reach the server from the Internet: WireGuard handshakes and enrollment API.
+pass in on egress proto udp to port 51820
+pass in on egress proto tcp to port 8443
