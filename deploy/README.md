@@ -19,7 +19,7 @@ below gives the files the right owner and mode.
 | systemd | set by `LoadCredentialEncrypted=` | owned by the service user, `0400`, on a private tmpfs | [`systemd/claimward-server.service`](systemd/claimward-server.service) |
 | Docker Compose / Swarm | `/run/secrets` (set `CREDENTIALS_DIRECTORY` by hand) | Swarm: `mode: 0400`; plain Compose: chown/chmod the host file | [`compose/compose.yaml`](compose/compose.yaml) |
 | Podman (Quadlet) | `/run/secrets` (set by hand) | `Secret=...,mode=0400,uid=...` | [`podman/claimward-server.container`](podman/claimward-server.container) |
-| Kubernetes | the Secret volume's mount path (set by hand) | `defaultMode: 0400`; files are owned by root, so the pod runs as uid 0 with only `NET_ADMIN` | [`kubernetes/claimward-server.yaml`](kubernetes/claimward-server.yaml) |
+| Kubernetes | the Secret volume's mount path (set by hand) | `defaultMode: 0440` + `fsGroup`: files are root:fsGroup `0440`, accepted; the pod runs as uid/gid 65532 with only `NET_ADMIN`, which needs `setcap cap_net_admin=+ep` on the image binary (see below) | [`kubernetes/claimward-server.yaml`](kubernetes/claimward-server.yaml) |
 
 No container image is published yet; the container examples name a placeholder
 registry. The WireGuard interface (`wg0`) must already exist on the host (for
@@ -44,6 +44,33 @@ sudo systemctl daemon-reload && sudo systemctl enable --now claimward-server
 `--name` must equal the credential name the unit gives (`name:path`), or
 decryption fails. `systemd-analyze verify claimward-server.service` checks the
 unit; `systemd-analyze security claimward-server.service` scores the hardening.
+
+## Kubernetes (non-root)
+
+Since v0.6.1 the pod runs as uid/gid 65532, `runAsNonRoot: true`, with
+`capabilities: drop [ALL], add [NET_ADMIN]`, `allowPrivilegeEscalation: false`,
+`readOnlyRootFilesystem: true` and the `RuntimeDefault` seccomp profile. The
+Secret volume has `defaultMode: 0440` and the pod `fsGroup: 65532`, so the files
+are `root:65532`, `0440`: the server accepts a root-owned `0440` file whose
+group is its gid or a supplementary group. `0444`/`0644`, a foreign group or
+another owner are refused.
+
+**Does `NET_ADMIN` work for a non-root uid? Not by `add` alone.** The server
+needs it for wgctrl, nftables and the interface MTU, and it never raises
+capabilities itself. Kubernetes puts an added capability in the bounding and
+permitted sets but sets no ambient capability, and on `execve` of a non-root
+uid the kernel clears the permitted set unless the binary has file
+capabilities. So the image's binary must carry them:
+
+```sh
+setcap cap_net_admin=+ep /claimward-server   # in the image build
+```
+
+`no_new_privs` (`allowPrivilegeEscalation: false`) does not prevent this, since
+the file capability grants nothing beyond what `add` already put in the
+permitted set. This is the kernel's documented behaviour (capabilities(7)); it
+was not run on a cluster here. Without the `setcap`, the first netlink call
+fails with `EPERM`; the fallback is uid 0 with `defaultMode: 0400`.
 
 ## Hosts without systemd
 

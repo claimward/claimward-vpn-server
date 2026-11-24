@@ -252,9 +252,22 @@ names are fixed, and one trailing newline is trimmed:
 A missing required file stops the start and names the file. Before reading,
 each file is checked through its open descriptor (`O_NOFOLLOW`, then `fstat`):
 it must be a regular file (no symlink), owned by the server's uid, with no
-group or other permission (`0400`), non-empty and at most 64 KiB; otherwise the
-server refuses, with the fix: Swarm `mode: 0400`, Kubernetes `defaultMode: 0400`
-(+ `fsGroup`/`runAsUser`), Podman `--secret ...,mode=0400`, else `chmod 0400`.
+group or other permission (`0400`), non-empty and at most 64 KiB. One more
+shape is accepted, for Kubernetes: a file **owned by root, mode exactly `0440`,
+whose group is the process's gid or one of its supplementary groups** (what a
+Secret volume gives with `defaultMode: 0440` and `fsGroup`), so the pod need not
+run as root. Otherwise the server refuses, with the fix: Swarm `mode: 0400`,
+Kubernetes `defaultMode: 0440` + `fsGroup`/`runAsUser`/`runAsGroup`, Podman
+`--secret ...,mode=0400`, else `chmod 0400`.
+
+**Kubernetes and `NET_ADMIN` as a non-root uid.** `capabilities.add:
+[NET_ADMIN]` alone is not enough: Kubernetes sets no ambient capability, the
+server does not raise one, and the kernel drops the permitted set when a
+non-root uid executes a binary without file capabilities. The image's binary
+needs `setcap cap_net_admin=+ep` (see
+[`deploy/kubernetes/`](deploy/kubernetes/claimward-server.yaml)); without it the
+first netlink call fails with `EPERM`. This follows capabilities(7) and was not
+measured on a cluster.
 
 ⛔ **Migration from v0.5.0** (breaking). `ADMIN_TOKEN`, `WG_PRIVATE_KEY`,
 `WG_PRIVATE_KEY_FILE` and `GOAUTHN_GATEWAY_SECRET_FILE` are **no longer read**,

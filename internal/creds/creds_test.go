@@ -133,7 +133,7 @@ func TestRefusesGroupOrOtherAccess(t *testing.T) {
 	dir := t.TempDir()
 	put(t, dir, WGPrivateKey, "k", 0o644)
 	_, err := Read(dir, WGPrivateKey)
-	for _, want := range []string{"mode: 0400", "defaultMode: 0400", "--secret wg-private-key,mode=0400", "chmod 0400"} {
+	for _, want := range []string{"mode: 0400", "defaultMode: 0440", "--secret wg-private-key,mode=0400", "chmod 0400"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("fix lacks %q: %v", want, err)
 		}

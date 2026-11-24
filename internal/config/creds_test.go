@@ -120,5 +120,5 @@ func TestUnsafeRequiredCredentialRefused(t *testing.T) {
 	if err := os.Chmod(filepath.Join(dir, "wg-private-key"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loadErr(t, "wg-private-key", "defaultMode: 0400")
+	loadErr(t, "wg-private-key", "defaultMode: 0440")
 }

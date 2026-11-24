@@ -1,5 +1,5 @@
 // Package admin serves the multi-tenant management API and the embedded Svelte
-// WebUI under /admin. The API is guarded by a static ADMIN_TOKEN (bearer); the
+// WebUI under /admin. The API is guarded by the admin-token credential (bearer); the
 // SPA is served unauthenticated (it holds the token client-side and presents it
 // on each API call).
 package admin

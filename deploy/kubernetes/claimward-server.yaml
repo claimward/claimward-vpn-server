@@ -5,12 +5,31 @@
 #     --from-file=wg-private-key=./wg-private-key
 #   (add --from-file=github-token=..., admin-token=..., goauthn-gateway-secret=...)
 #
-# A Secret volume is tmpfs (no emptyDir is involved) and its files are owned by
-# ROOT, with the group set by fsGroup. The server refuses a credential its own
-# uid does not own, so the pod runs as uid 0 with every capability dropped but
-# NET_ADMIN, which the WireGuard and nftables netlink calls need anyway.
+# The pod does NOT run as root. A Secret volume is tmpfs; its files belong to
+# ROOT, with the group set by fsGroup, and the mode by defaultMode. The server
+# accepts exactly this shape: root-owned, mode 0440, group = the process's gid
+# or one of its supplementary groups (fsGroup is applied as one). It still
+# refuses 0444/0644, another owner, a foreign group and symlinks.
 #
-# No image is published yet: build one from this repository and push it.
+# NET_ADMIN AS A NON-ROOT UID (the honest answer, from capabilities(7), not
+# measured here: no cluster was available). The WireGuard (wgctrl), nftables
+# and interface-MTU calls all need CAP_NET_ADMIN, and the server binary does
+# not acquire it itself (it does no capset/prctl). Kubernetes `add: [NET_ADMIN]`
+# puts the capability in the container's bounding and permitted sets, but NO
+# ambient capability is set. On execve of a non-root uid the kernel drops the
+# permitted set unless the binary carries FILE CAPABILITIES. So `add` alone
+# does NOT work for a non-root uid: the binary in the image must be
+#   setcap cap_net_admin=+ep /claimward-server
+# (e.g. in the image build: `RUN setcap cap_net_admin=+ep /claimward-server`;
+# file capabilities need a filesystem that keeps xattrs, which an image layer
+# does). allowPrivilegeEscalation: false (no_new_privs) does not forbid this:
+# the file capability grants nothing beyond the permitted set `add` already
+# gave the container. Without the setcap, either run as uid 0 (and set
+# defaultMode 0400, runAsUser 0, runAsNonRoot false) or the first netlink call
+# fails with EPERM at start.
+#
+# No image is published yet: build one from this repository, setcap its binary
+# and push it.
 # The WireGuard interface (wg0) must exist on the node: hostNetwork.
 apiVersion: apps/v1
 kind: Deployment
@@ -29,13 +48,14 @@ spec:
       hostNetwork: true
       automountServiceAccountToken: false
       securityContext:
-        runAsUser: 0 # owner of the Secret files, see above
-        runAsNonRoot: false
-        fsGroup: 0
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532 # the group of the Secret files, see above
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: claimward-server
-          image: registry.example.org/claimward-vpn-server:v0.6.0
+          image: registry.example.org/claimward-vpn-server:v0.6.1 # binary with cap_net_admin=+ep
           env:
             - {name: CREDENTIALS_DIRECTORY, value: /run/credentials}
             - {name: WG_ENDPOINT, value: "vpn.example.org:51820"}
@@ -46,11 +66,11 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
-              add: [NET_ADMIN]
+              add: [NET_ADMIN] # needs the file capability on the binary, see above
           volumeMounts:
             - {name: credentials, mountPath: /run/credentials, readOnly: true}
       volumes:
         - name: credentials
           secret:
             secretName: claimward-credentials
-            defaultMode: 0400
+            defaultMode: 0440 # root:65532 0440, accepted; 0444 is refused
