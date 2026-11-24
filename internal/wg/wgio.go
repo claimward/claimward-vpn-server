@@ -104,7 +104,9 @@ func encodeSet(l ioLayout, ops []peerOp) ([]byte, error) {
 		for _, p := range op.AIPs {
 			// The address is the Addr's four bytes, so a 4in6 address would be
 			// taken for an IPv4 one by the kernel: refuse everything but Is4.
-			if !p.IsValid() || !p.Addr().Is4() || p.Bits() < 0 || p.Bits() > 32 {
+			// IsValid is the prefix length: PrefixFrom keeps the address of a
+			// length outside 0..32 and only reports it invalid.
+			if !p.IsValid() || !p.Addr().Is4() {
 				return nil, fmt.Errorf("wg: peer %d: allowed address %v is not an IPv4 prefix", i, p)
 			}
 		}

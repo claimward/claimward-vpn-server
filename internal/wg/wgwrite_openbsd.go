@@ -6,6 +6,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+	"golang.zx2c4.com/wireguard/wgctrl"
 )
 
 // hostLayout is the layout the release's own header gave the generator.
@@ -28,7 +29,7 @@ type dataIO struct {
 // makes. It needs root: the parent of the privilege-separated server is root.
 type ioctlWriter struct{ device string }
 
-func newPeerWriter(device string) peerWriter { return ioctlWriter{device: device} }
+func newPeerWriter(_ *wgctrl.Client, device string) peerWriter { return ioctlWriter{device: device} }
 
 func (w ioctlWriter) setPeers(ops []peerOp) error {
 	if len(w.device) == 0 || len(w.device) >= unix.IFNAMSIZ {

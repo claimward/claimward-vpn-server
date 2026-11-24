@@ -138,6 +138,8 @@ func TestEncodeRefusals(t *testing.T) {
 		{"ipv6", []peerOp{{AIPs: []netip.Prefix{netip.MustParsePrefix("fd00::1/128")}}}, "not an IPv4"},
 		{"4in6", []peerOp{{AIPs: []netip.Prefix{netip.MustParsePrefix("::ffff:10.0.0.1/128")}}}, "not an IPv4"},
 		{"invalid", []peerOp{{AIPs: []netip.Prefix{{}}}}, "not an IPv4"},
+		{"length 33", []peerOp{{AIPs: []netip.Prefix{netip.PrefixFrom(netip.MustParseAddr("10.0.0.1"), 33)}}}, "not an IPv4"},
+		{"length -1", []peerOp{{AIPs: []netip.Prefix{netip.PrefixFrom(netip.MustParseAddr("10.0.0.1"), -1)}}}, "not an IPv4"},
 	}
 	for _, c := range cases {
 		buf, err := encodeSet(layout64, c.ops)
