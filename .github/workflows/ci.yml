@@ -88,8 +88,9 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.27.4'
+      - run: sudo apt-get install -y --no-install-recommends acl
       - run: CGO_ENABLED=0 go test -c -o creds.test ./internal/creds
-      - run: sudo CW_REQUIRE_ROOT=1 ./creds.test -test.v -test.count=1 -test.run 'TestRootOwnedFilesThroughRead'
+      - run: sudo CW_REQUIRE_ROOT=1 ./creds.test -test.v -test.count=1 -test.run 'TestRootOwnedFilesThroughRead|TestSystemdACLCredentialThroughRead'
 
   # The image's binary must keep cap_net_admin=+ep through the stage copy: a
   # non-root uid has no ambient capabilities, so without the file capability
@@ -127,6 +128,46 @@ jobs:
       - run: go run github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0 -strict -summary deploy/kubernetes
       - run: sudo install -m 0755 /bin/true /usr/local/bin/claimward-server
       - run: systemd-analyze verify deploy/systemd/claimward-server.service
+
+  # The unit is STARTED, as shipped (DynamicUser=yes, LoadCredentialEncrypted=):
+  # systemd hands the credential to the service's dynamic user through a POSIX
+  # ACL, which the loader must accept. The only change is a drop-in that sets
+  # WG_DRYRUN (the runner has no wg0). The server logs the public key it
+  # derives from the credential, so seeing the key we generated in the journal
+  # proves the credential was read, not merely that the process stayed up.
+  systemd-unit:
+    name: start the systemd unit (DynamicUser + credentials)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.4'
+      - run: sudo apt-get install -y --no-install-recommends wireguard-tools acl
+      - run: CGO_ENABLED=0 go build -o claimward-server ./cmd/claimward-server
+      - run: sudo install -m 0755 claimward-server /usr/local/bin/claimward-server
+      - name: install and start the unit
+        run: |
+          set -eu
+          key="$(wg genkey)"
+          pub="$(printf '%s' "$key" | wg pubkey)"
+          other="$(wg genkey | wg pubkey)"
+          sudo mkdir -p /etc/credstore.encrypted /etc/systemd/system/claimward-server.service.d
+          printf '%s\n' "$key" | sudo systemd-creds encrypt --with-key=host --name=wg-private-key - /etc/credstore.encrypted/claimward.wg-private-key
+          sudo install -m 0644 deploy/systemd/claimward-server.service /etc/systemd/system/claimward-server.service
+          printf '[Service]\nEnvironment=WG_DRYRUN=true\n' | sudo tee /etc/systemd/system/claimward-server.service.d/ci.conf >/dev/null
+          sudo systemctl daemon-reload
+          sudo systemctl start claimward-server
+          timeout 60 sh -c "until sudo journalctl -u claimward-server --no-pager | grep -qF 'server_pubkey=$pub'; do sleep 1; done"
+          # Control: a key we did not give it must not be in the journal.
+          if sudo journalctl -u claimward-server --no-pager | grep -qF "server_pubkey=$other"; then exit 1; fi
+          test "$(systemctl show -p DynamicUser --value claimward-server)" = yes
+          test "$(systemctl is-active claimward-server)" = active
+          # The shape under test: root-owned, with a named-user ACL.
+          sudo getfacl -p /run/credentials/claimward-server.service/wg-private-key | tee acl.txt
+          grep -Eq '^user:[^:]+:r--$' acl.txt
+      - if: failure()
+        run: sudo journalctl -u claimward-server --no-pager; sudo systemctl status claimward-server --no-pager || true
 
   # OpenBSD: the test binaries are cross-built here and RUN as root inside a
   # real OpenBSD VM (no Go toolchain needed there). CW_REQUIRE_OPENBSD=1 makes

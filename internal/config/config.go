@@ -20,7 +20,8 @@ type Config struct {
 	TLSKey     string
 
 	// MetricsAddr is where /metrics is served, on its own listener: it names
-	// every tenant. Loopback by default.
+	// every tenant. Empty (the default) means no metrics at all: there is no
+	// default port to clash with another service.
 	MetricsAddr string
 
 	GRPCAddr     string // RouteService gRPC listen address, e.g. ":8444"
@@ -86,7 +87,7 @@ func Load() (*Config, error) {
 		TLSCert:              os.Getenv("TLS_CERT"),
 		TLSKey:               os.Getenv("TLS_KEY"),
 		GRPCAddr:             env("GRPC_ADDR", ":8444"),
-		MetricsAddr:          env("METRICS_ADDR", "127.0.0.1:9090"),
+		MetricsAddr:          os.Getenv("METRICS_ADDR"),
 		GRPCEndpoint:         os.Getenv("GRPC_ENDPOINT"),
 		AuthProvider:         env("AUTH_PROVIDER", "github"),
 		OIDCIssuer:           os.Getenv("OIDC_ISSUER"),

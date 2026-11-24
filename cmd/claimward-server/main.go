@@ -222,20 +222,29 @@ func run(log *slog.Logger) error {
 
 	httpSrv := newHTTPServer(cfg.ListenAddr, root)
 
-	metricsSrv := newHTTPServer(cfg.MetricsAddr, metricsMux(m))
-	metricsLn, err := net.Listen("tcp", cfg.MetricsAddr)
-	if err != nil {
-		return err
+	// ⛔ No default address: a fixed port clashes with whatever else the host
+	// runs (:9090 is Prometheus' own). Metrics are off unless METRICS_ADDR is set.
+	var metricsSrv *http.Server
+	if cfg.MetricsAddr == "" {
+		log.Info("metrics disabled (set METRICS_ADDR to serve /metrics)")
+	} else {
+		metricsSrv = newHTTPServer(cfg.MetricsAddr, metricsMux(m))
+		metricsLn, err := net.Listen("tcp", cfg.MetricsAddr)
+		if err != nil {
+			return err
+		}
+		go metricsSrv.Serve(limitConns(metricsLn)) //nolint:errcheck
+		log.Info("metrics listening", "addr", metricsLn.Addr().String())
 	}
-	go metricsSrv.Serve(limitConns(metricsLn)) //nolint:errcheck
-	log.Info("metrics listening", "addr", metricsLn.Addr().String())
 
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = httpSrv.Shutdown(shutCtx)
-		_ = metricsSrv.Shutdown(shutCtx)
+		if metricsSrv != nil {
+			_ = metricsSrv.Shutdown(shutCtx)
+		}
 	}()
 
 	log.Info("claimward-server listening",

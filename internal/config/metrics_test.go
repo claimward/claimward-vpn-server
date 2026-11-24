@@ -2,16 +2,17 @@ package config
 
 import "testing"
 
-// /metrics names every tenant: it is served on loopback unless told otherwise.
-func TestMetricsAddrDefaultsToLoopback(t *testing.T) {
+// /metrics names every tenant and a fixed port clashes with other services:
+// nothing is served unless METRICS_ADDR is set.
+func TestMetricsAreOffUnlessAddressed(t *testing.T) {
 	baseEnv(t)
 	t.Setenv("METRICS_ADDR", "")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.MetricsAddr != "127.0.0.1:9090" {
-		t.Errorf("MetricsAddr = %q, want the loopback default", c.MetricsAddr)
+	if c.MetricsAddr != "" {
+		t.Errorf("MetricsAddr = %q, want none by default", c.MetricsAddr)
 	}
 	t.Setenv("METRICS_ADDR", "10.0.0.5:9100")
 	if c, err = Load(); err != nil || c.MetricsAddr != "10.0.0.5:9100" {

@@ -86,6 +86,19 @@ func checkFile(f *os.File, path, name string) error {
 		return refuse(path, name, "is not a regular file")
 	}
 	if why := judge(uint32(st.Mode), st.Uid, st.Gid); why != "" {
+		// systemd gives another user's service a root-owned file whose
+		// stat mode is 0440 (the ACL mask) and whose ACL names the service
+		// uid: accepted only if the ACL is exactly that (see acl.go).
+		if st.Uid == 0 && st.Mode&0o777 == 0o440 {
+			acl, err := readACL(f)
+			if err == nil {
+				aclWhy := judgeACL(acl, uint32(getuid()))
+				if aclWhy == "" {
+					return nil
+				}
+				why += "; and it " + aclWhy
+			}
+		}
 		return refuse(path, name, why)
 	}
 	// Size is judged by Read, on what it actually read (empty, over MaxSize).

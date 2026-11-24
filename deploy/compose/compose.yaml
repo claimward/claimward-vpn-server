@@ -23,6 +23,8 @@ services:
       WG_ENDPOINT: vpn.example.org:51820
       AUTH_PROVIDER: github
       GITHUB_ALLOWED_ORGS: example-org
+      # /metrics is off unless this is set (it names every tenant; keep it private):
+      # METRICS_ADDR: 127.0.0.1:9100
     secrets:
       # The container's process uid must own the files, with mode 0400.
       # Compose (non-Swarm) bind-mounts the host file as it is: chown and chmod

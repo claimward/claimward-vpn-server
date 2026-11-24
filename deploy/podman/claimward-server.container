@@ -22,6 +22,8 @@ Environment=CREDENTIALS_DIRECTORY=/run/secrets
 Environment=WG_ENDPOINT=vpn.example.org:51820
 Environment=AUTH_PROVIDER=github
 Environment=GITHUB_ALLOWED_ORGS=example-org
+# /metrics is off unless this is set (it names every tenant; keep it private):
+#Environment=METRICS_ADDR=127.0.0.1:9100
 # The secret files must be owned by the container's uid, mode 0400, and be
 # named for the credential: target= sets the file name under /run/secrets.
 Secret=claimward-wg-private-key,type=mount,target=wg-private-key,uid=65532,mode=0400
