@@ -3,7 +3,7 @@
 #
 # The image is published on every tag, signed with cosign (keyless) and with a
 # provenance attestation; verify it with
-#   cosign verify ghcr.io/claimward/claimward-vpn-server:v0.10.0 \
+#   cosign verify ghcr.io/claimward/claimward-vpn-server:v0.11.0 \
 #     --certificate-identity-regexp '^https://github.com/claimward/claimward-vpn-server/' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 #
@@ -11,7 +11,7 @@
 # it and the host's nftables: host networking and CAP_NET_ADMIN are required.
 services:
   claimward-server:
-    image: ghcr.io/claimward/claimward-vpn-server:v0.10.0
+    image: ghcr.io/claimward/claimward-vpn-server:v0.11.0
     network_mode: host
     cap_drop: [ALL]
     cap_add: [NET_ADMIN]
