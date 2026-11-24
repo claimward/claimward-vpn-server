@@ -68,7 +68,8 @@ jobs:
       # The runner's Docker leaves FORWARD at DROP in its own table, which would
       # drop forwarded packets regardless of claimward's table.
       - run: sudo iptables -P FORWARD ACCEPT || true
-      - run: sudo CW_REQUIRE_NETNS=1 ./fw.test -test.v -test.count=1 -test.run 'TestNetnsPolicyIsEnforced|TestNetnsMSSIsClamped'
+      - run: sudo ip6tables -P FORWARD ACCEPT || true
+      - run: sudo CW_REQUIRE_NETNS=1 ./fw.test -test.v -test.count=1 -test.run 'TestNetnsPolicyIsEnforced|TestNetnsMSSIsClamped|TestNetnsMSSIsClampedIPv6'
       # The gateway sets its interface MTU itself (SIOCSIFMTU): read it back
       # from a dummy link in a fresh namespace.
       - run: CGO_ENABLED=0 go test -c -o wg.test ./internal/wg
