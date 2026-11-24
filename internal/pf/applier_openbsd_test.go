@@ -232,10 +232,10 @@ func TestCheckRuleNoticesEachField(t *testing.T) {
 		t.Errorf("0.0.0.0/0 against the kernel's any: %v", err)
 	}
 	mss := Spec{Action: Match, Iface: "wg0", AF: 4, Proto: protoTCP, MaxMSS: 1300}
-	if err := checkRule(decodedRule{Spec: mss, Direction: PF_IN}, mss); err == nil {
-		t.Error("a max-mss rule without the scrub flag was accepted")
+	if err := checkRule(decodedRule{Spec: mss, Direction: PF_IN, ScrubFlags: PFSTATE_SCRUB_TCP}, mss); err == nil {
+		t.Error("a max-mss rule carrying scrub flags was accepted")
 	}
-	if err := checkRule(decodedRule{Spec: mss, Direction: PF_IN, ScrubFlags: PFSTATE_SCRUB_TCP}, mss); err != nil {
+	if err := checkRule(decodedRule{Spec: mss, Direction: PF_IN}, mss); err != nil {
 		t.Errorf("a correct max-mss rule: %v", err)
 	}
 }

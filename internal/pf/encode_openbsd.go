@@ -145,8 +145,9 @@ func encodeRule(s Spec, anchor string, ticket uint32, rec func(member)) ([]byte,
 	w.put32(mRtableid, 0xffffffff) // -1: any routing table, as pfctl writes it
 	w.put32(mOnrdomain, 0xffffffff)
 	if s.MaxMSS != 0 {
+		// pfctl writes max_mss alone for "scrub (max-mss N)" and leaves
+		// scrub_flags 0 (measured against the oracle on 7.9 and 8.0).
 		w.put16(mMaxMSS, s.MaxMSS)
-		w.put16(mScrubFlags, PFSTATE_SCRUB_TCP)
 	}
 
 	var src, dst PfRuleAddr

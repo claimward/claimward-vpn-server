@@ -278,12 +278,8 @@ func checkRule(d decodedRule, want Spec) error {
 	if d.KeepState != keepStateFor(want.Action) {
 		return fmt.Errorf("keep_state %d, want %d", d.KeepState, keepStateFor(want.Action))
 	}
-	wantScrub := uint16(0)
-	if want.MaxMSS != 0 {
-		wantScrub = PFSTATE_SCRUB_TCP
-	}
-	if d.ScrubFlags != wantScrub {
-		return fmt.Errorf("scrub_flags %#x, want %#x", d.ScrubFlags, wantScrub)
+	if d.ScrubFlags != 0 { // max-mss is carried by max_mss alone, as pfctl writes it
+		return fmt.Errorf("scrub_flags %#x, want 0", d.ScrubFlags)
 	}
 	return nil
 }
