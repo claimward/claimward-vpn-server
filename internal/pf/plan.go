@@ -125,10 +125,7 @@ func NewPlan(rs fw.Ruleset, gen uint32) (Plan, error) {
 			return Plan{}, fmt.Errorf("pf: set %q defined twice", s.Name)
 		}
 		n := TableName(s.Name, gen)
-		if err := validTableName(n); err != nil {
-			return Plan{}, err
-		}
-		names[s.Name] = n
+		names[s.Name] = n // its length and characters are checked by Validate
 		for _, a := range s.Addrs {
 			if !a.Is4() || a.IsUnspecified() {
 				return Plan{}, fmt.Errorf("pf: set %q holds %v, which is not an IPv4 host address", s.Name, a)
