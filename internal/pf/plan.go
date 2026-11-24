@@ -174,15 +174,18 @@ func NewPlan(rs fw.Ruleset, gen uint32) (Plan, error) {
 	if len(hooked) == 0 {
 		return Plan{}, fmt.Errorf("pf: the ruleset has no policy chain")
 	}
-	for _, c := range hooked[1:] {
-		if !reflect.DeepEqual(c.Rules, hooked[0].Rules) {
-			return Plan{}, fmt.Errorf("pf: chains %s and %s differ, pf has no separate hooks", hooked[0].Name, c.Name)
+	var first fw.Chain
+	for i, c := range hooked {
+		if i == 0 {
+			first = c
+		} else if !reflect.DeepEqual(c.Rules, first.Rules) {
+			return Plan{}, fmt.Errorf("pf: chains %s and %s differ, pf has no separate hooks", first.Name, c.Name)
 		}
 	}
 	sawFinal := false
-	for _, r := range hooked[0].Rules {
+	for _, r := range first.Rules {
 		if sawFinal {
-			return Plan{}, fmt.Errorf("pf: a rule follows the final verdict of chain %s", hooked[0].Name)
+			return Plan{}, fmt.Errorf("pf: a rule follows the final verdict of chain %s", first.Name)
 		}
 		switch {
 		case r.Jump != "":
