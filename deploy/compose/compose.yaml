@@ -1,14 +1,17 @@
 # Docker Compose. Secrets are files mounted under /run/secrets; the server
 # reads them from $CREDENTIALS_DIRECTORY, set here by hand (no systemd).
 #
-# No image is published yet: build one from this repository and push it where
-# your hosts can pull it, then set `image:`.
+# The image is published on every tag, signed with cosign (keyless) and with a
+# provenance attestation; verify it with
+#   cosign verify ghcr.io/claimward/claimward-vpn-server:v0.7.2 \
+#     --certificate-identity-regexp '^https://github.com/claimward/claimward-vpn-server/' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 #
 # The WireGuard interface (wg0) must exist on the host, and the server programs
 # it and the host's nftables: host networking and CAP_NET_ADMIN are required.
 services:
   claimward-server:
-    image: registry.example.org/claimward-vpn-server:v0.6.0
+    image: ghcr.io/claimward/claimward-vpn-server:v0.7.2
     network_mode: host
     cap_drop: [ALL]
     cap_add: [NET_ADMIN]

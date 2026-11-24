@@ -28,8 +28,9 @@
 # defaultMode 0400, runAsUser 0, runAsNonRoot false) or the first netlink call
 # fails with EPERM at start.
 #
-# No image is published yet: build one from this repository, setcap its binary
-# and push it.
+# The published image (ghcr.io/claimward/claimward-vpn-server, built from the
+# Dockerfile at the repository root) already carries that file capability; CI
+# reads it back from the final image. A self-built image must do the same.
 # The WireGuard interface (wg0) must exist on the node: hostNetwork.
 apiVersion: apps/v1
 kind: Deployment
@@ -55,7 +56,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: claimward-server
-          image: registry.example.org/claimward-vpn-server:v0.6.1 # binary with cap_net_admin=+ep
+          image: ghcr.io/claimward/claimward-vpn-server:v0.7.2 # binary has cap_net_admin=+ep
           env:
             - {name: CREDENTIALS_DIRECTORY, value: /run/credentials}
             - {name: WG_ENDPOINT, value: "vpn.example.org:51820"}

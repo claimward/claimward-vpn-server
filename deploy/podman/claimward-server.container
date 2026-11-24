@@ -2,7 +2,8 @@
 # and `systemctl daemon-reload`. Create the secrets first:
 #   podman secret create claimward-wg-private-key wg-private-key
 #
-# No image is published yet: build one from this repository and push it.
+# The image is published on every tag, signed with cosign (keyless); see the
+# `cosign verify` line in deploy/compose/compose.yaml.
 # The WireGuard interface (wg0) must exist on the host.
 [Unit]
 Description=Claimward VPN control plane
@@ -10,7 +11,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=registry.example.org/claimward-vpn-server:v0.6.0
+Image=ghcr.io/claimward/claimward-vpn-server:v0.7.2
 Network=host
 DropCapability=ALL
 AddCapability=NET_ADMIN

@@ -90,6 +90,43 @@ jobs:
       - run: CGO_ENABLED=0 go test -c -o creds.test ./internal/creds
       - run: sudo CW_REQUIRE_ROOT=1 ./creds.test -test.v -test.count=1 -test.run 'TestRootOwnedFilesThroughRead'
 
+  # The image's binary must keep cap_net_admin=+ep through the stage copy: a
+  # non-root uid has no ambient capabilities, so without the file capability
+  # the first netlink call fails with EPERM. The FINAL image is exported and
+  # its tar extracted with xattrs; distroless has no getcap to run inside it.
+  image:
+    name: image (file capability survives the stage copy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get install -y --no-install-recommends libcap2-bin
+      - run: docker build -t claimward-image .
+      - run: test "$(docker inspect --format '{{.Config.User}}' claimward-image)" = "65532:65532"
+      - run: docker create --name cwx claimward-image
+      - run: mkdir -p "$RUNNER_TEMP/img" && docker export -o "$RUNNER_TEMP/img.tar" cwx
+      - run: sudo tar --xattrs --xattrs-include=security.capability -xf "$RUNNER_TEMP/img.tar" -C "$RUNNER_TEMP/img" claimward-server
+      - run: getcap "$RUNNER_TEMP/img/claimward-server" | grep -E 'cap_net_admin[=+]ep'
+      # Control: the same extraction without xattrs must show NO capability, so
+      # the check above can fail.
+      - run: |
+          mkdir -p "$RUNNER_TEMP/noattr"
+          sudo tar --no-xattrs -xf "$RUNNER_TEMP/img.tar" -C "$RUNNER_TEMP/noattr" claimward-server
+          test -z "$(getcap "$RUNNER_TEMP/noattr/claimward-server")"
+
+  # The Kubernetes manifest is checked against the API schemas, and the unit
+  # by systemd itself (a stub binary stands in for the one ExecStart names).
+  deploy-validate:
+    name: validate deploy/ (kubeconform, systemd-analyze)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.4'
+      - run: go run github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0 -strict -summary deploy/kubernetes
+      - run: sudo install -m 0755 /bin/true /usr/local/bin/claimward-server
+      - run: systemd-analyze verify deploy/systemd/claimward-server.service
+
   crossbuild:
     name: cross-build (${{ matrix.goarch }})
     runs-on: ubuntu-latest
