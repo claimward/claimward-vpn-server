@@ -16,6 +16,7 @@ type Manager struct {
 	ap    Applier
 	src   func() []Tenant
 	log   *slog.Logger
+	mtu   int // tunnel MTU to clamp the MSS to; 0 = no clamp
 
 	mu sync.Mutex
 }
@@ -23,6 +24,24 @@ type Manager struct {
 // NewManager builds a Manager. src is read at every Sync.
 func NewManager(iface string, ap Applier, src func() []Tenant, log *slog.Logger) *Manager {
 	return &Manager{iface: iface, ap: ap, src: src, log: log}
+}
+
+// ClampMSS makes every ruleset the Manager installs lower the MSS of TCP SYNs
+// crossing the interface to what mtu carries (see WithMSSClamp). It is part of
+// the same atomic table, so it is replaced with the policy and survives the
+// deny-all fallback. Call it before the first Sync; mtu 0 clamps nothing.
+func (m *Manager) ClampMSS(mtu int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mtu = mtu
+}
+
+func (m *Manager) build(ts []Tenant) Ruleset {
+	rs := Build(m.iface, ts)
+	if m.mtu > 0 {
+		rs = WithMSSClamp(rs, m.iface, m.mtu)
+	}
+	return rs
 }
 
 // Sync rebuilds and installs the ruleset.
@@ -34,11 +53,11 @@ func NewManager(iface string, ap Applier, src func() []Tenant, log *slog.Logger)
 func (m *Manager) Sync() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	err := m.ap.Apply(Build(m.iface, m.src()))
+	err := m.ap.Apply(m.build(m.src()))
 	if err == nil {
 		return nil
 	}
-	if e2 := m.ap.Apply(Build(m.iface, nil)); e2 != nil {
+	if e2 := m.ap.Apply(m.build(nil)); e2 != nil {
 		m.log.Error("firewall: cannot install deny-all either; the previous ruleset still stands", "err", e2)
 	}
 	return err
