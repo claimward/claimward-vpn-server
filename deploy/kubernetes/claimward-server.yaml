@@ -56,7 +56,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: claimward-server
-          image: ghcr.io/claimward/claimward-vpn-server:v0.7.2 # binary has cap_net_admin=+ep
+          image: ghcr.io/claimward/claimward-vpn-server:v0.10.0 # binary has cap_net_admin=+ep
           env:
             - {name: CREDENTIALS_DIRECTORY, value: /run/credentials}
             - {name: WG_ENDPOINT, value: "vpn.example.org:51820"}
