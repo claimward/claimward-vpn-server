@@ -261,7 +261,8 @@ fail closed.
   VMs: struct layout against the release's own header, load and read-back,
   `pfctl` as an oracle for the encoding, and a packet proof (traffic across
   pair(4) interfaces and routing domains is dropped or passed as the policy
-  says, and the SYN's MSS option is read with `tcpdump`).
+  says, and the SYN's MSS option is read with `tcpdump`: measured 1460 without the
+  clamp, 1350 with it, on a 1390 MTU, on 7.9 and 8.0).
 
 ## Credentials (v0.6.0)
 
