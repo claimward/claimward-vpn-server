@@ -61,6 +61,8 @@ enum {
 	OffIocAnchor      = PFI_OFF(anchor),
 	OffIocCall        = PFI_OFF(anchor_call),
 	OffIocRule        = PFI_OFF(rule),
+	OffKifName        = offsetof(struct pfi_kif, pfik_name),
+	OffKifFlags       = offsetof(struct pfi_kif, pfik_flags),
 };
 */
 import "C"
@@ -152,6 +154,11 @@ const (
 	OffIocAnchor          = C.OffIocAnchor
 	OffIocCall            = C.OffIocCall
 	OffIocRule            = C.OffIocRule
+	OffKifName            = C.OffKifName
+	OffKifFlags           = C.OffKifFlags
+	SizeofPfiKif          = C.sizeof_struct_pfi_kif
+	DIOCIGETIFACES        = C.DIOCIGETIFACES
+	PFI_IFLAG_SKIP        = C.PFI_IFLAG_SKIP
 )
 
 type PfAddr C.struct_pf_addr
@@ -163,3 +170,4 @@ type PfiocTable C.struct_pfioc_table
 type PfiocTransE C.struct_pfioc_trans_e
 type PfiocTrans C.struct_pfioc_trans
 type PfStatus C.struct_pf_status
+type PfiocIface C.struct_pfioc_iface
