@@ -14,6 +14,46 @@ package pf
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <net/pfvar.h>
+#include <stddef.h>
+
+// struct pf_rule holds unions, pointers and anonymous structs that cgo -godefs
+// cannot spell as Go types, so the rule is NOT generated as a struct: the
+// encoder writes into a [SizeofPfRule]byte at these offsets, which C computes.
+#define PFR_OFF(f) offsetof(struct pf_rule, f)
+#define PFI_OFF(f) offsetof(struct pfioc_rule, f)
+enum {
+	OffRuleSrc        = PFR_OFF(src),
+	OffRuleDst        = PFR_OFF(dst),
+	OffRuleSkip       = PFR_OFF(skip),
+	OffRuleIfname     = PFR_OFF(ifname),
+	OffRuleRcvIfname  = PFR_OFF(rcv_ifname),
+	OffRuleRtableid   = PFR_OFF(rtableid),
+	OffRuleOnrdomain  = PFR_OFF(onrdomain),
+	OffRuleNr         = PFR_OFF(nr),
+	OffRuleCuid       = PFR_OFF(cuid),
+	OffRuleCpid       = PFR_OFF(cpid),
+	OffRuleMaxMSS     = PFR_OFF(max_mss),
+	OffRuleScrubFlags = PFR_OFF(scrub_flags),
+	OffRuleAction     = PFR_OFF(action),
+	OffRuleDirection  = PFR_OFF(direction),
+	OffRuleQuick      = PFR_OFF(quick),
+	OffRuleKeepState  = PFR_OFF(keep_state),
+	OffRuleAf         = PFR_OFF(af),
+	OffRuleProto      = PFR_OFF(proto),
+	OffRuleFlags      = PFR_OFF(flags),
+	OffRuleFlagset    = PFR_OFF(flagset),
+	OffRuleTimeout    = PFR_OFF(timeout),
+	OffRuleExptime    = PFR_OFF(exptime),
+	OffRuleEvaluations = PFR_OFF(evaluations),
+	OffRulePktrate    = PFR_OFF(pktrate),
+	OffRuleEntries    = PFR_OFF(entries),
+	OffIocAction      = PFI_OFF(action),
+	OffIocTicket      = PFI_OFF(ticket),
+	OffIocNr          = PFI_OFF(nr),
+	OffIocAnchor      = PFI_OFF(anchor),
+	OffIocCall        = PFI_OFF(anchor_call),
+	OffIocRule        = PFI_OFF(rule),
+};
 */
 import "C"
 
@@ -51,11 +91,43 @@ const (
 	PF_TABLE_NAME_SIZE = C.PF_TABLE_NAME_SIZE
 )
 
+const (
+	OffRuleSrc         = C.OffRuleSrc
+	OffRuleDst         = C.OffRuleDst
+	OffRuleSkip        = C.OffRuleSkip
+	OffRuleIfname      = C.OffRuleIfname
+	OffRuleRcvIfname   = C.OffRuleRcvIfname
+	OffRuleRtableid    = C.OffRuleRtableid
+	OffRuleOnrdomain   = C.OffRuleOnrdomain
+	OffRuleNr          = C.OffRuleNr
+	OffRuleCuid        = C.OffRuleCuid
+	OffRuleCpid        = C.OffRuleCpid
+	OffRuleMaxMSS      = C.OffRuleMaxMSS
+	OffRuleScrubFlags  = C.OffRuleScrubFlags
+	OffRuleAction      = C.OffRuleAction
+	OffRuleDirection   = C.OffRuleDirection
+	OffRuleQuick       = C.OffRuleQuick
+	OffRuleKeepState   = C.OffRuleKeepState
+	OffRuleAf          = C.OffRuleAf
+	OffRuleProto       = C.OffRuleProto
+	OffRuleFlags       = C.OffRuleFlags
+	OffRuleFlagset     = C.OffRuleFlagset
+	OffRuleTimeout     = C.OffRuleTimeout
+	OffRuleExptime     = C.OffRuleExptime
+	OffRuleEvaluations = C.OffRuleEvaluations
+	OffRulePktrate     = C.OffRulePktrate
+	OffRuleEntries     = C.OffRuleEntries
+	OffIocAction       = C.OffIocAction
+	OffIocTicket       = C.OffIocTicket
+	OffIocNr           = C.OffIocNr
+	OffIocAnchor       = C.OffIocAnchor
+	OffIocCall         = C.OffIocCall
+	OffIocRule         = C.OffIocRule
+)
+
 type PfAddr C.struct_pf_addr
 type PfAddrWrap C.struct_pf_addr_wrap
 type PfRuleAddr C.struct_pf_rule_addr
-type PfRule C.struct_pf_rule
-type PfiocRule C.struct_pfioc_rule
 type PfrTable C.struct_pfr_table
 type PfrAddr C.struct_pfr_addr
 type PfiocTable C.struct_pfioc_table

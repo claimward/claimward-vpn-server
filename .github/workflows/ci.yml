@@ -175,6 +175,8 @@ jobs:
   # self-hosted OpenBSD runner can replace the vmactions step.
   openbsd:
     name: openbsd ${{ matrix.release }} (${{ matrix.goarch }})
+    # A self-hosted pool must never execute fork code: same-repo PRs and pushes only.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -205,6 +207,8 @@ jobs:
   # release that drifts fails here before the gateway can mis-encode a rule.
   pfabi:
     name: pf ABI ${{ matrix.release }}
+    # A self-hosted pool must never execute fork code: same-repo PRs and pushes only.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
