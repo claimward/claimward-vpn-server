@@ -5,7 +5,8 @@ Control plane for the Claimward VPN. It authenticates devices against a
 pluggable identity provider — **GitHub** by default, any **OIDC** issuer, or a
 **go-authn** provider — and programs a **WireGuard** gateway, one peer per enrolled device.
 
-Designed to run co-located on the Linux gateway host: it manages *peers* on an
+Designed to run co-located on the gateway host, Linux (nftables) or, from
+v0.10.0, OpenBSD (pf, see [OpenBSD](#openbsd-pf-from-v0100)): it manages *peers* on an
 existing `wg0` interface via `wgctrl` (the interface itself is created by
 wg-quick/systemd at boot).
 
@@ -128,7 +129,6 @@ to every tenant that names any of:
 | `domains` | the domain of a **verified** email (an unverified one is a string the person typed) |
 | `groups` | the token's `groups` claim (OIDC; go-authn: eduPerson entitlements), or the person's GitHub organisations |
 | `idps` | the institution that vouched for them: go-authn's `idp`, a SAML entity ID |
-
 | `members` | GitHub **logins**, named one by one (see below) |
 
 ⛔ **A person who matches no tenant is refused**: `403 not_a_member` on
