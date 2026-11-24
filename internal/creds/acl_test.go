@@ -135,3 +135,18 @@ func FuzzJudgeACL(f *testing.F) {
 		}
 	})
 }
+
+func TestJudgeACLNeverPanicsOnMalformedInput(t *testing.T) {
+	for _, in := range [][]byte{nil, {2}, {2, 0, 0, 0, 1}, append(aclBytes(2, systemdACL(7)...), 1)} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("judgeACL(%v) panicked: %v", in, r)
+				}
+			}()
+			if judgeACL(in, 7) == "" {
+				t.Errorf("judgeACL(%v) accepted a malformed ACL", in)
+			}
+		}()
+	}
+}
