@@ -136,7 +136,7 @@ func TestRunRefusesAMetricsAddressItCannotBind(t *testing.T) {
 		}
 	})
 	defer stop.Stop()
-	err = run(quiet)
+	err = run(quiet, nil)
 	if err == nil {
 		t.Fatal("run went on with its metrics address taken")
 	}

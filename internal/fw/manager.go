@@ -53,11 +53,17 @@ func (m *Manager) build(ts []Tenant) Ruleset {
 func (m *Manager) Sync() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	err := m.ap.Apply(m.build(m.src()))
+	apply := func(ts []Tenant) error { return m.ap.Apply(m.build(ts)) }
+	if ta, ok := m.ap.(TenantApplier); ok {
+		// The applier lives in another process (privilege separation): it
+		// builds the ruleset itself, from the tenants alone.
+		apply = ta.ApplyTenants
+	}
+	err := apply(m.src())
 	if err == nil {
 		return nil
 	}
-	if e2 := m.ap.Apply(m.build(nil)); e2 != nil {
+	if e2 := apply(nil); e2 != nil {
 		m.log.Error("firewall: cannot install deny-all either; the previous ruleset still stands", "err", e2)
 	}
 	return err
@@ -90,6 +96,15 @@ func FromStores(ts *tenant.Store, st *store.Store) func() []Tenant {
 		}
 		return res
 	}
+}
+
+// A TenantApplier installs the ruleset that Build and WithMSSClamp make of the
+// tenants, in a process that holds the interface name and the tunnel MTU
+// itself. A Manager whose Applier is one hands it the tenants instead of a
+// Ruleset: the process that serves the network never writes a rule, only says
+// whose peers may reach what, and the privileged one decides what that means.
+type TenantApplier interface {
+	ApplyTenants([]Tenant) error
 }
 
 // Discard is the Applier of WG_DRYRUN: it logs and installs nothing.

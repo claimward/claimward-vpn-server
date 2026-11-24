@@ -1,17 +1,27 @@
 package rcproof
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/claimward/claimward-vpn-client/pkg/protocol"
+	"github.com/claimward/claimward-vpn-server/internal/fakeauthn"
+	"github.com/go-authn/wireguard"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 const (
+	childUser  = "_claimward"
 	dayLog     = "/var/log/daemon"
 	listening  = "claimward-server listening"
 	noAnchor   = "has no unrestricted `anchor"
@@ -91,11 +101,15 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 	// The server is installed, the same way the README says.
 	must(t, "install", "-m", "0555", bin, "/usr/local/bin/claimward-server")
 	must(t, "install", "-m", "0555", filepath.Join(deploy, "claimward_server"), "/etc/rc.d/claimward_server")
+	// The unprivileged account, as the README creates it.
+	if _, err := run(t, "id", childUser); err != nil {
+		must(t, "useradd", "-g", "=uid", "-c", "claimward", "-d", "/var/empty", "-s", "/sbin/nologin", "-r", "1..999", childUser)
+	}
 	must(t, "install", "-d", "-m", "0755", "-o", "root", "-g", "wheel", "/etc/claimward")
-	must(t, "install", "-d", "-m", "0700", "-o", "root", "-g", "wheel", "/etc/claimward/credentials")
+	must(t, "install", "-d", "-m", "0700", "-o", childUser, "-g", childUser, "/etc/claimward/credentials")
 
-	// Secrets: root-owned, 0400, created from stdin-free files so no value is
-	// ever in an argument list.
+	// Secrets: owned by the unprivileged account, 0400, created from stdin-free
+	// files so no value is ever in an argument list.
 	rawKey := make([]byte, 32)
 	if _, err := rand.Read(rawKey); err != nil {
 		t.Fatal(err)
@@ -106,15 +120,42 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 	if err := os.WriteFile(src, []byte(key+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	must(t, "install", "-m", "0400", "-o", "root", "-g", "wheel", src, "/etc/claimward/credentials/wg-private-key")
+	keyCred := "/etc/claimward/credentials/wg-private-key"
+	must(t, "install", "-m", "0400", "-o", childUser, "-g", childUser, src, keyCred)
+	gwSecret := filepath.Join(tmp, "goauthn-gateway-secret")
+	if err := os.WriteFile(gwSecret, []byte(fakeauthn.GatewaySecret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	must(t, "install", "-m", "0400", "-o", childUser, "-g", childUser, gwSecret, "/etc/claimward/credentials/goauthn-gateway-secret")
 
-	// Non-secret settings (the shipped example, loopback listeners).
+	// A go-authn provider in this process, which knows one device and one
+	// institution; the tenant names the institution.
+	prov := fakeauthn.New(t)
+	devPriv, err := wgtypes.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	devPub := devPriv.PublicKey().String()
+	pk, err := wireguard.ParseKey(devPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov.SetPeers(1, wireguard.Peer{Key: pk, Subject: "sub-alice", Expires: time.Now().Add(time.Hour)})
+	tenants := filepath.Join(tmp, "tenants.json")
+	if err := os.WriteFile(tenants, []byte(`[{"id":"default","idps":["https://idp.example/idp"],"policy":[{"cidr":"10.80.0.0/24","proto":"tcp","ports":[22]}]}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	must(t, "install", "-m", "0400", "-o", childUser, "-g", childUser, tenants, "/etc/claimward/tenants.json")
+
+	// Non-secret settings (the shipped example, loopback listeners, the provider).
 	env, err := os.ReadFile(filepath.Join(deploy, "environment.example"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	envFile := filepath.Join(tmp, "environment")
-	extra := "LISTEN_ADDR=127.0.0.1:8443\nGRPC_ADDR=127.0.0.1:8444\n"
+	extra := "LISTEN_ADDR=127.0.0.1:8443\nGRPC_ADDR=127.0.0.1:8444\n" +
+		"AUTH_PROVIDER=go-authn\nOIDC_ISSUER=" + prov.Issuer() + "\nOIDC_CLIENT_ID=" + fakeauthn.Audience + "\n" +
+		"GOAUTHN_GATEWAY_CLIENT_ID=" + fakeauthn.GatewayID + "\nTENANTS_FILE=/etc/claimward/tenants.json\n"
 	if err := os.WriteFile(envFile, append(env, extra...), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -167,12 +208,98 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 	if rules := must(t, "pfctl", "-a", "claimward", "-sr"); !strings.Contains(rules, "wg0") {
 		t.Errorf("the anchor holds no rule for wg0:\n%s", rules)
 	}
+
+	// Privilege separation: the process that serves the network is the
+	// unprivileged account's, the one that drives the kernel is root's, and
+	// the secret is the account's alone.
+	if got := strings.TrimSpace(must(t, "stat", "-f", "%Su %Mp%Lp", keyCred)); got != childUser+" 0400" {
+		t.Errorf("the key credential is %q, want %q", got, childUser+" 0400")
+	}
+	// ps(1) cuts a user name to 8 characters, so the accounts are compared by uid.
+	childUID := strings.TrimSpace(must(t, "id", "-u", childUser))
+	var child, parent int
+	for _, line := range strings.Split(must(t, "ps", "-ax", "-o", "uid,args"), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 || f[1] != "/usr/local/bin/claimward-server" {
+			continue // not the server (the shell that started it has a longer command line)
+		}
+		switch {
+		case len(f) >= 3 && f[2] == "privsep-child":
+			if f[0] != childUID {
+				t.Errorf("the serving process runs as uid %q, want %s's %s: %s", f[0], childUser, childUID, line)
+			}
+			child++
+		case len(f) == 2:
+			if f[0] != "0" {
+				t.Errorf("the privileged process runs as %q: %s", f[0], line)
+			}
+			parent++
+		}
+	}
+	if child != 1 || parent != 1 {
+		t.Errorf("want one privileged parent and one %s child, saw %d and %d\n%s", childUser, parent, child, must(t, "ps", "-ax", "-o", "user,args"))
+	}
+	if got := logSince(t, off); !strings.Contains(got, "restricted") {
+		t.Errorf("the child never reported its unveil and pledge:\n%s", got)
+	}
+
+	// A device enrolls through the child; the peer lands on wg0 through the parent.
+	enroll := func(key string) (int, string) {
+		t.Helper()
+		body, _ := json.Marshal(protocol.EnrollRequest{PublicKey: key})
+		req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8443"+protocol.PathEnroll, bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+prov.AccessToken("sub-alice", "alice", map[string]any{"idp": "https://idp.example/idp"}))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	// wgctrl's OpenBSD driver is read-only (ConfigureDevice returns a sentinel),
+	// so the parent cannot program a peer on OpenBSD yet: this is not new with
+	// privilege separation, and the enrolment is refused with a gateway error.
+	// What this lane can prove is that the request left the pledged child, was
+	// validated by the parent and reached its gateway.
+	if code, _ := enroll(devPub); code == http.StatusOK {
+		t.Errorf("enroll succeeded although wgctrl cannot configure wg0 on OpenBSD; update this test and the README")
+	}
+	if got := logSince(t, off); !strings.Contains(got, "privileged parent: add peer") {
+		t.Errorf("the child's peer request never reached the parent:\n%s", got)
+	}
+	// Negative control: a key the provider never registered is refused by the
+	// child, and does not reach wg0.
+	other, _ := wgtypes.GeneratePrivateKey()
+	if code, _ := enroll(other.PublicKey().String()); code == http.StatusOK {
+		t.Errorf("an unregistered key enrolled")
+	}
+	if wgOut := must(t, "ifconfig", "wg0"); strings.Contains(wgOut, other.PublicKey().String()) {
+		t.Errorf("an unregistered key reached wg0")
+	}
+
 	if out, err := run(t, "rcctl", "stop", "claimward_server"); err != nil {
 		t.Fatalf("rcctl stop: %v\n%s", err, out)
 	}
 	if out, err := run(t, "rcctl", "check", "claimward_server"); err == nil {
 		t.Fatalf("rcctl check passes after stop:\n%s", out)
 	}
+
+	// 1b. Negative control: a secret the unprivileged account does not own is
+	// refused (rc_configtest does not look at the key file, the server does),
+	// and the server does not come up.
+	must(t, "chown", "root:wheel", keyCred)
+	off = logSize(t)
+	if out, err := run(t, "rcctl", "start", "claimward_server"); err == nil {
+		_, _ = run(t, "rcctl", "stop", "claimward_server")
+		t.Fatalf("rcctl start succeeded with a credential the unprivileged account does not own:\n%s", out)
+	}
+	time.Sleep(2 * time.Second)
+	if got := logSince(t, off); strings.Contains(got, listening) {
+		t.Fatalf("the server came up with a credential it does not own:\n%s", got)
+	}
+	must(t, "chown", childUser+":"+childUser, keyCred)
 
 	// 2. Negative control: with the anchor gone from pf.conf the start fails,
 	// and the server says why.
