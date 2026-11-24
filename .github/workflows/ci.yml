@@ -281,3 +281,21 @@ jobs:
           go-version: '1.27.4'
       - run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=amd64 go build ./... && CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=amd64 go vet ./internal/fw
 
+  # The `openbsd` job runs on amd64 only (no arm64 VMs); the pfabi job checks
+  # the arm64 ztypes file's content on a VM but never compiles it. Cross-compile
+  # the openbsd/arm64 code here so a compile error cannot stay green.
+  devbuild-openbsd-arm64:
+    name: dev build (openbsd/arm64)
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: '0'
+      GOOS: openbsd
+      GOARCH: arm64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.4'
+      - run: go build ./... && go vet ./internal/pf ./internal/wg ./cmd/...
+      - run: go test -c -o /dev/null ./internal/pf && go test -c -o /dev/null ./internal/wg && go test -c -o /dev/null ./deploy/openbsd/rcproof
+
