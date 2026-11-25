@@ -1,4 +1,4 @@
-# Deploying claimward-server (v0.11.0)
+# Deploying claimward-server (v0.11.1)
 
 Every secret is a **file in a credentials directory**, `$CREDENTIALS_DIRECTORY`,
 never an environment variable. The names are fixed:
@@ -34,7 +34,7 @@ from the [`Dockerfile`](../Dockerfile) on every tag for amd64 and arm64
 provenance attestation:
 
 ```sh
-cosign verify ghcr.io/claimward/claimward-vpn-server:v0.11.0 \
+cosign verify ghcr.io/claimward/claimward-vpn-server:v0.11.1 \
   --certificate-identity-regexp '^https://github.com/claimward/claimward-vpn-server/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
