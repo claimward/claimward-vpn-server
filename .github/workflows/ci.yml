@@ -291,6 +291,7 @@ jobs:
             set -e
             uname -a
             id -u
+            CW_REQUIRE_OPENBSD=1 ./pf.test -test.v -test.count=1 -test.run TestDiagPfStaysEnabled || true
             # The parent/child protocol on this kernel: the refusals, the
             # socketpair to a real child process.
             ./privsep.test -test.v -test.count=1
