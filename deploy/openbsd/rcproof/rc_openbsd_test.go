@@ -89,6 +89,62 @@ func waitLog(t *testing.T, offset int64, want string) string {
 	return ""
 }
 
+// A daemon that is alive when rc.d first looks and exits 1 before it ever
+// listens (what the server does with a credential it does not own, after the
+// privilege-separated child has started) must make `rcctl start` FAIL. rc.subr's
+// default rc_check is a pgrep, and with rc_bg=YES it reported ok on sight of the
+// process: the operator read (ok) for a daemon that was already gone, and the
+// rcctl step above flaked on it. The stub lives 2 s, well past rc.subr's first
+// 0.5 s poll, so the old script fails this test every time. It is run as
+// "/bin/sh <script>" so that its command line is exactly what rc_check's pgrep
+// matches (a bare script shows as "/bin/sh script" and would never match).
+func TestRcdStartFailsWhenTheDaemonDiesBeforeItListens(t *testing.T) {
+	deploy := os.Getenv("CW_DEPLOY_DIR")
+	_, rcctl := exec.LookPath("rcctl")
+	requireVM(t, "not the CI VM (needs rcctl, CW_DEPLOY_DIR)", rcctl == nil && deploy != "" && os.Getuid() == 0)
+
+	if _, err := run(t, "id", childUser); err != nil {
+		must(t, "useradd", "-g", "=uid", "-c", "claimward", "-d", "/var/empty", "-s", "/sbin/nologin", "-r", "1..999", childUser)
+	}
+	must(t, "install", "-d", "-m", "0755", "-o", "root", "-g", "wheel", "/etc/claimward")
+	must(t, "install", "-d", "-m", "0700", "-o", childUser, "-g", childUser, "/etc/claimward/credentials")
+	// A port nothing listens on: the stub never opens it.
+	if err := os.WriteFile("/etc/claimward/environment", []byte("LISTEN_ADDR=127.0.0.1:8443\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stub := filepath.Join(t.TempDir(), "cwstub-daemon")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nsleep 2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	must(t, "install", "-m", "0555", stub, "/usr/local/bin/cwstub-daemon")
+	t.Cleanup(func() { _ = os.Remove("/usr/local/bin/cwstub-daemon"); _ = os.Remove("/etc/rc.d/cwstub") })
+
+	script, err := os.ReadFile(filepath.Join(deploy, "claimward_server"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `daemon="/usr/local/bin/claimward-server"`
+	if !bytes.Contains(script, []byte(want)) {
+		t.Fatalf("the rc script no longer has the line %s", want)
+	}
+	script = bytes.Replace(script, []byte(want), []byte(`daemon="/bin/sh /usr/local/bin/cwstub-daemon"`), 1)
+	if err := os.WriteFile("/etc/rc.d/cwstub", script, 0o555); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	out, err := run(t, "rcctl", "start", "cwstub")
+	if err == nil {
+		_, _ = run(t, "rcctl", "stop", "cwstub")
+		t.Fatalf("rcctl start reported success for a daemon that exits 1 before listening:\n%s", out)
+	}
+	t.Logf("start failed after %s: %s", time.Since(start).Round(100*time.Millisecond), strings.TrimSpace(out))
+	if out, err := run(t, "rcctl", "check", "cwstub"); err == nil {
+		t.Fatalf("rcctl check passes for a daemon that is gone:\n%s", out)
+	}
+}
+
 func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 	bin := os.Getenv("CW_SERVER_BIN")
 	deploy := os.Getenv("CW_DEPLOY_DIR")

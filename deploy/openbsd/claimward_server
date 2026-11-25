@@ -54,6 +54,21 @@ rc_pre() {
 	rc_configtest
 }
 
+# "Running" means the child LISTENS, not that a process of that name exists.
+# rc.subr's default rc_check is a pgrep: while rc_bg=YES it reports a start as
+# ok as soon as the process is seen, even when the _claimward child is about to
+# refuse a credential it does not own and exit. Waiting for the listener makes
+# `rcctl start` fail in that case (the daemon's exit status comes back from
+# rc_start) instead of printing (ok) for a daemon that is already gone.
+rc_check() {
+	pgrep -T "${daemon_rtable}" -q -xf "${pexp}" || return 1
+	local _addr _host _port
+	_addr=$(set -a; . /etc/claimward/environment 2>/dev/null; echo "${LISTEN_ADDR:-:8443}")
+	_host=${_addr%:*}
+	_port=${_addr##*:}
+	nc -z "${_host:-127.0.0.1}" "${_port}" 2>/dev/null
+}
+
 # rc.subr runs the daemon through `su -fl`, which resets the environment, so
 # the settings and CREDENTIALS_DIRECTORY are set INSIDE that shell. Secrets are
 # never in it: only the directory that holds them.
