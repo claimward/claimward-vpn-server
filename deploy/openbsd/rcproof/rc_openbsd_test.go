@@ -95,7 +95,9 @@ func waitLog(t *testing.T, offset int64, want string) string {
 // default rc_check is a pgrep, and with rc_bg=YES it reported ok on sight of the
 // process: the operator read (ok) for a daemon that was already gone, and the
 // rcctl step above flaked on it. The stub lives 2 s, well past rc.subr's first
-// 0.5 s poll, so the old script fails this test every time.
+// 0.5 s poll, so the old script fails this test every time. It is run as
+// "/bin/sh <script>" so that its command line is exactly what rc_check's pgrep
+// matches (a bare script shows as "/bin/sh script" and would never match).
 func TestRcdStartFailsWhenTheDaemonDiesBeforeItListens(t *testing.T) {
 	deploy := os.Getenv("CW_DEPLOY_DIR")
 	_, rcctl := exec.LookPath("rcctl")
@@ -126,7 +128,7 @@ func TestRcdStartFailsWhenTheDaemonDiesBeforeItListens(t *testing.T) {
 	if !bytes.Contains(script, []byte(want)) {
 		t.Fatalf("the rc script no longer has the line %s", want)
 	}
-	script = bytes.Replace(script, []byte(want), []byte(`daemon="/usr/local/bin/cwstub-daemon"`), 1)
+	script = bytes.Replace(script, []byte(want), []byte(`daemon="/bin/sh /usr/local/bin/cwstub-daemon"`), 1)
 	if err := os.WriteFile("/etc/rc.d/cwstub", script, 0o555); err != nil {
 		t.Fatal(err)
 	}
