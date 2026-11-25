@@ -166,6 +166,11 @@ rcctl enable claimward_server
 rcctl start claimward_server && rcctl check claimward_server
 ```
 
+`rcctl start` reports `(ok)` only once the server accepts connections on
+`LISTEN_ADDR` (the script's `rc_check` is the listener, not a `pgrep`), so a
+daemon that exits first, for instance on a credential it does not own, is
+`(failed)`.
+
 The server logs to syslog (`daemon.info`, `/var/log/daemon`). It refuses to start
 without `anchor "claimward"` in the main ruleset, with `set skip on` covering
 `wg0`, and on any release but 7.9 and 8.0. The `openbsd` CI lane installs this
