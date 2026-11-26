@@ -18,7 +18,7 @@ func (f fakeMembers) HasNamedMembers() bool     { return len(f) > 0 }
 // A GitHub whose /user is id 42 ("octocat") and that has no organisations.
 func loneGitHub(t *testing.T) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(appCheck(42, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/user":
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 42, "login": "octocat"})
@@ -27,14 +27,14 @@ func loneGitHub(t *testing.T) *httptest.Server {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
+	})))
 	t.Cleanup(srv.Close)
 	return srv
 }
 
 func TestNamedMemberIsAdmittedWithoutAnyOrg(t *testing.T) {
 	gh := loneGitHub(t)
-	v := NewGitHubVerifier(gh.URL, nil).WithMembers(fakeMembers{"github:42": true})
+	v := NewGitHubVerifier(gh.URL, nil).WithApp(testClientID, testSecret).WithMembers(fakeMembers{"github:42": true})
 	c, err := v.Verify(context.Background(), "t")
 	if err != nil || c.Subject != "github:42" {
 		t.Fatalf("claims %+v err %v", c, err)
@@ -45,7 +45,7 @@ func TestNamedMemberIsAdmittedWithoutAnyOrg(t *testing.T) {
 // the ID, so the new holder of the name is refused.
 func TestARenamedLoginWhoseIDChangedIsRefused(t *testing.T) {
 	gh := loneGitHub(t) // the account now called octocat is id 42
-	v := NewGitHubVerifier(gh.URL, nil).WithMembers(fakeMembers{"github:583231": true})
+	v := NewGitHubVerifier(gh.URL, nil).WithApp(testClientID, testSecret).WithMembers(fakeMembers{"github:583231": true})
 	if _, err := v.Verify(context.Background(), "t"); err == nil {
 		t.Error("an account with the pinned login but another ID was admitted")
 	}

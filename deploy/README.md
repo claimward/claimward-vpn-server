@@ -9,6 +9,14 @@ never an environment variable. The names are fixed:
 | `admin-token` | you want the admin API/WebUI (no file = disabled) |
 | `goauthn-gateway-secret` | `AUTH_PROVIDER=go-authn` |
 | `github-token` | any tenant has `members` |
+| `github-client-secret` | `AUTH_PROVIDER=github` (the default), with `GITHUB_CLIENT_ID` |
+
+With `AUTH_PROVIDER=github` the server admits only tokens that **Claimward's own
+GitHub OAuth app** minted: it asks GitHub ("Check a token",
+`POST /applications/{client_id}/token`, basic auth `client_id:client_secret`)
+before it trusts one. `GITHUB_CLIENT_ID` (public) is an environment variable;
+the app's client secret is the `github-client-secret` file. Without both the
+server does not start, and there is no setting to turn the check off.
 
 The server refuses a file that is a symlink, not a regular file, readable by
 group or other, not owned by its own uid, empty, or over 64 KiB. Each platform
@@ -47,6 +55,9 @@ containers: host networking).
 ```sh
 # one credential at a time, encrypted to this host (TPM2 and/or the host key)
 wg genkey | sudo systemd-creds encrypt --name=wg-private-key - /etc/credstore.encrypted/claimward.wg-private-key
+
+# AUTH_PROVIDER=github: the OAuth app's client secret (and GITHUB_CLIENT_ID in the unit)
+printf '%s' "$CLIENT_SECRET" | sudo systemd-creds encrypt --name=github-client-secret - /etc/credstore.encrypted/claimward.github-client-secret
 
 # optional ones
 printf '%s' "$TOKEN" | sudo systemd-creds encrypt --name=github-token - /etc/credstore.encrypted/claimward.github-token
@@ -148,6 +159,7 @@ useradd -g =uid -c claimward -d /var/empty -s /sbin/nologin -r 1..999 _claimward
 install -d -m 0755 -o root -g wheel /etc/claimward
 install -d -m 0700 -o _claimward -g _claimward /etc/claimward/credentials
 install -m 0400 -o _claimward -g _claimward /path/to/wg-private-key /etc/claimward/credentials/wg-private-key
+# AUTH_PROVIDER=github: github-client-secret (same install line); GITHUB_CLIENT_ID goes in /etc/claimward/environment
 # optional: admin-token, github-token, goauthn-gateway-secret (same install line)
 # the TLS key and certificate and the tenants file: -o _claimward, 0400 / 0444
 
@@ -199,8 +211,9 @@ sudo useradd --system --no-create-home --shell /usr/sbin/nologin claimward
 sudo sdcreds setup                       # host secret, if missing
 sudo install -d /etc/claimward/credentials.encrypted
 wg genkey | sudo sdcreds encrypt --name=wg-private-key - /etc/claimward/credentials.encrypted/wg-private-key
+printf '%s' "$CLIENT_SECRET" | sudo sdcreds encrypt --name=github-client-secret - /etc/claimward/credentials.encrypted/github-client-secret
 # optional: github-token, admin-token, goauthn-gateway-secret, the same way
-printf 'WG_ENDPOINT=vpn.example.org:51820\nAUTH_PROVIDER=github\nGITHUB_ALLOWED_ORGS=example-org\n' | sudo tee /etc/claimward/env
+printf 'WG_ENDPOINT=vpn.example.org:51820\nAUTH_PROVIDER=github\nGITHUB_ALLOWED_ORGS=example-org\nGITHUB_CLIENT_ID=Iv1.0123456789abcdef\n' | sudo tee /etc/claimward/env
 sudo cp -a s6/claimward-server /etc/s6-scan/   # your scan directory; s6-svscan picks it up
 ```
 
@@ -216,6 +229,16 @@ refused, and that stopping the service takes the mount away.
 
 Containers do not need `sdcreds`: Compose, Podman and Kubernetes (above) mount
 secrets as files already.
+
+## Upgrading to v0.12.0 (GitHub tokens are bound to the OAuth app)
+
+**Breaking for `AUTH_PROVIDER=github`.** Before any other change, add
+`GITHUB_CLIENT_ID` (your Claimward OAuth app's client ID) to the environment and
+the app's client secret as the `github-client-secret` credential file. Without
+them v0.12.0 refuses to start. Until now any GitHub OAuth token with `read:org`
+from a member, whichever app minted it, enrolled a peer; now only tokens minted
+by your app do. Members' clients already use that app, so their stored tokens
+keep working. Other providers are unaffected.
 
 ## Migrating from v0.5.0
 

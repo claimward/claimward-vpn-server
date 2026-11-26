@@ -4,7 +4,8 @@ import "testing"
 
 func githubEnv(t *testing.T, orgs string) {
 	t.Helper()
-	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy"})
+	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy", "github-client-secret": "app-secret"})
+	t.Setenv("GITHUB_CLIENT_ID", "Iv1.ourapp")
 	t.Setenv("WG_ENDPOINT", "vpn.example.org:51820")
 	t.Setenv("AUTH_PROVIDER", "")
 	t.Setenv("GITHUB_ALLOWED_ORGS", orgs)
@@ -32,6 +33,27 @@ func TestGitHubWithOrgsIsAccepted(t *testing.T) {
 	if len(c.GitHubAllowedOrgs) != 2 {
 		t.Errorf("orgs = %v", c.GitHubAllowedOrgs)
 	}
+}
+
+// ⛔ The OAuth app is mandatory with the github provider, no opt-out: without
+// the client ID, or without the secret file, Load refuses.
+func TestGitHubRequiresTheOAuthApp(t *testing.T) {
+	githubEnv(t, "acme")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.GitHubClientID != "Iv1.ourapp" || c.GitHubClientSecret != "app-secret" {
+		t.Errorf("app = %q / secret read = %v", c.GitHubClientID, c.GitHubClientSecret != "")
+	}
+
+	githubEnv(t, "acme")
+	t.Setenv("GITHUB_CLIENT_ID", "")
+	loadErr(t, "GITHUB_CLIENT_ID")
+
+	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy"})
+	t.Setenv("GITHUB_CLIENT_ID", "Iv1.ourapp")
+	loadErr(t, "github-client-secret")
 }
 
 // Other providers are not subject to the GitHub rule.

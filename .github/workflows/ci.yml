@@ -154,6 +154,7 @@ jobs:
           other="$(wg genkey | wg pubkey)"
           sudo mkdir -p /etc/credstore.encrypted /etc/systemd/system/claimward-server.service.d
           printf '%s\n' "$key" | sudo systemd-creds encrypt --with-key=host --name=wg-private-key - /etc/credstore.encrypted/claimward.wg-private-key
+          printf 'app-secret\n' | sudo systemd-creds encrypt --with-key=host --name=github-client-secret - /etc/credstore.encrypted/claimward.github-client-secret
           sudo install -m 0644 deploy/systemd/claimward-server.service /etc/systemd/system/claimward-server.service
           printf '[Service]\nEnvironment=WG_DRYRUN=true\n' | sudo tee /etc/systemd/system/claimward-server.service.d/ci.conf >/dev/null
           sudo systemctl daemon-reload
@@ -201,7 +202,8 @@ jobs:
           sudo sdcreds setup
           sudo install -d -m 0755 /etc/claimward /etc/claimward/credentials.encrypted
           printf '%s\n' "$key" | sudo sdcreds encrypt --name=wg-private-key - /etc/claimward/credentials.encrypted/wg-private-key
-          printf 'WG_ENDPOINT=vpn.example.org:51820\nAUTH_PROVIDER=github\nGITHUB_ALLOWED_ORGS=example-org\nWG_INTERFACE=wg0\n' | sudo tee /etc/claimward/env >/dev/null
+          printf 'app-secret\n' | sudo sdcreds encrypt --name=github-client-secret - /etc/claimward/credentials.encrypted/github-client-secret
+          printf 'WG_ENDPOINT=vpn.example.org:51820\nAUTH_PROVIDER=github\nGITHUB_ALLOWED_ORGS=example-org\nGITHUB_CLIENT_ID=Iv1.ci\nWG_INTERFACE=wg0\n' | sudo tee /etc/claimward/env >/dev/null
           sudo install -d -m 0755 /etc/s6-scan
           sudo cp -a deploy/s6/claimward-server /etc/s6-scan/claimward-server
           sudo ip netns add cw
@@ -241,7 +243,7 @@ jobs:
           sudo install -d -m 0755 "$d"
           sudo sh -c "wg genkey > $d/wg-private-key && chown claimward $d/wg-private-key && chmod 0644 $d/wg-private-key"
           test "$(stat -c %a $d/wg-private-key)" = 644
-          if sudo -u claimward env CREDENTIALS_DIRECTORY="$d" WG_DRYRUN=true WG_ENDPOINT=x:1 AUTH_PROVIDER=github GITHUB_ALLOWED_ORGS=x /usr/local/bin/claimward-server > bad.txt 2>&1; then
+          if sudo -u claimward env CREDENTIALS_DIRECTORY="$d" WG_DRYRUN=true WG_ENDPOINT=x:1 AUTH_PROVIDER=github GITHUB_ALLOWED_ORGS=x GITHUB_CLIENT_ID=Iv1.ci /usr/local/bin/claimward-server > bad.txt 2>&1; then
             cat bad.txt; exit 1
           fi
           cat bad.txt

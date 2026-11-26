@@ -28,6 +28,7 @@ const (
 	WGPrivateKey         = "wg-private-key"
 	AdminToken           = "admin-token"
 	GoAuthnGatewaySecret = "goauthn-gateway-secret"
+	GitHubClientSecret   = "github-client-secret"
 )
 
 // MaxSize bounds a credential file.
@@ -42,7 +43,7 @@ var readAll = io.ReadAll
 
 // Names lists the credential names Read accepts.
 func Names() []string {
-	return []string{GitHubToken, WGPrivateKey, AdminToken, GoAuthnGatewaySecret}
+	return []string{GitHubToken, WGPrivateKey, AdminToken, GoAuthnGatewaySecret, GitHubClientSecret}
 }
 
 // ValidName reports whether name is one of the fixed credential names. A name

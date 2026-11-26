@@ -15,7 +15,7 @@ var hits atomic.Int64
 // whether the user is an active member of any org.
 func fakeGitHub(t *testing.T, member bool) *httptest.Server {
 	t.Helper()
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := httptest.NewServer(appCheck(424242, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		switch {
 		case r.URL.Path == "/user":
@@ -27,7 +27,7 @@ func fakeGitHub(t *testing.T, member bool) *httptest.Server {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
+	})))
 	t.Cleanup(s.Close)
 	return s
 }
@@ -51,10 +51,10 @@ func TestGitHubVerifierWithoutAllowlistRefusesStrangers(t *testing.T) {
 }
 
 func TestGitHubVerifierWithAllowlistAdmitsMembersOnly(t *testing.T) {
-	if _, err := NewGitHubVerifier(fakeGitHub(t, true).URL, []string{"acme"}).Verify(context.Background(), "t"); err != nil {
+	if _, err := appVerifierOrgs(fakeGitHub(t, true).URL, "acme").Verify(context.Background(), "t"); err != nil {
 		t.Errorf("an active member was refused: %v", err)
 	}
-	if _, err := NewGitHubVerifier(fakeGitHub(t, false).URL, []string{"acme"}).Verify(context.Background(), "t"); err == nil {
+	if _, err := appVerifierOrgs(fakeGitHub(t, false).URL, "acme").Verify(context.Background(), "t"); err == nil {
 		t.Error("a non-member was accepted")
 	}
 }
