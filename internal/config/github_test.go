@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func githubEnv(t *testing.T, orgs string) {
 	t.Helper()
@@ -49,11 +52,22 @@ func TestGitHubRequiresTheOAuthApp(t *testing.T) {
 
 	githubEnv(t, "acme")
 	t.Setenv("GITHUB_CLIENT_ID", "")
-	loadErr(t, "GITHUB_CLIENT_ID")
+	refuses(t, "GITHUB_CLIENT_ID")
 
 	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy"})
 	t.Setenv("GITHUB_CLIENT_ID", "Iv1.ourapp")
-	loadErr(t, "github-client-secret")
+	refuses(t, "github-client-secret")
+}
+
+func refuses(t *testing.T, want string) {
+	t.Helper()
+	c, err := Load()
+	if err == nil {
+		t.Fatalf("Load accepted it: %+v", c)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not name %q", err, want)
+	}
 }
 
 // Other providers are not subject to the GitHub rule.
