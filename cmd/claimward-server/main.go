@@ -104,33 +104,9 @@ func run(log *slog.Logger, link *privsep.Client) error {
 	defer stop()
 
 	ts := tenant.New(cfg.PushRoutes, cfg.DNS)
-	providers := auth.NewSet()
-	var ids []string
-	var githubs []*auth.GitHubVerifier
-	var goauthnP *config.Provider
-	for i := range cfg.Providers {
-		p := &cfg.Providers[i]
-		opts := auth.Options{Provider: p.Kind, Issuer: p.OIDCIssuer, ClientID: p.OIDCClientID, AllowedDomains: p.AllowedDomains}
-		if p.Kind == protocol.KindGitHub {
-			// Each GitHub provider is its own OAuth app; the API URL is the
-			// provider's own (GitHub Enterprise), defaulting to github.com.
-			opts.GitHubAPIURL, opts.GitHubAllowedOrgs = p.APIURL, p.AllowedOrgs
-			opts.GitHubClientID, opts.GitHubClientSecret = p.GitHubClientID, p.ClientSecret
-		}
-		v, err := auth.New(ctx, opts)
-		if err != nil {
-			return fmt.Errorf("provider %q: %w", p.ID, err)
-		}
-		if gv, ok := v.(*auth.GitHubVerifier); ok {
-			githubs = append(githubs, gv)
-		}
-		if p.Kind == protocol.KindGoAuthn {
-			goauthnP = p
-		}
-		if err := providers.Add(p.ID, v); err != nil {
-			return err
-		}
-		ids = append(ids, p.ID)
+	providers, ids, githubs, goauthnP, err := buildProviders(ctx, cfg.Providers)
+	if err != nil {
+		return err
 	}
 
 	alloc, err := ipam.New(cfg.VPNCIDR)
@@ -345,6 +321,41 @@ func run(log *slog.Logger, link *privsep.Client) error {
 		return nil
 	}
 	return err
+}
+
+// buildProviders turns the providers file's entries into verifiers, in order.
+// It returns the set, the ids, the GitHub verifiers (whose members the tenants
+// are pinned against) and the go-authn provider, if any.
+func buildProviders(ctx context.Context, list []config.Provider) (*auth.Set, []string, []*auth.GitHubVerifier, *config.Provider, error) {
+	providers := auth.NewSet()
+	var ids []string
+	var githubs []*auth.GitHubVerifier
+	var goauthnP *config.Provider
+	for i := range list {
+		p := &list[i]
+		opts := auth.Options{Provider: p.Kind, Issuer: p.OIDCIssuer, ClientID: p.OIDCClientID, AllowedDomains: p.AllowedDomains}
+		if p.Kind == protocol.KindGitHub {
+			// Each GitHub provider is its own OAuth app; the API URL is the
+			// provider's own (GitHub Enterprise), defaulting to github.com.
+			opts.GitHubAPIURL, opts.GitHubAllowedOrgs = p.APIURL, p.AllowedOrgs
+			opts.GitHubClientID, opts.GitHubClientSecret = p.GitHubClientID, p.ClientSecret
+		}
+		v, err := auth.New(ctx, opts)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("provider %q: %w", p.ID, err)
+		}
+		if gv, ok := v.(*auth.GitHubVerifier); ok {
+			githubs = append(githubs, gv)
+		}
+		if p.Kind == protocol.KindGoAuthn {
+			goauthnP = p
+		}
+		if err := providers.Add(p.ID, v); err != nil {
+			return nil, nil, nil, nil, err
+		}
+		ids = append(ids, p.ID)
+	}
+	return providers, ids, githubs, goauthnP, nil
 }
 
 func reaper(ctx context.Context, srv *api.Server, log *slog.Logger) {

@@ -165,10 +165,8 @@ func (w *wrappedStream) Context() context.Context { return w.ctx }
 // providerFromContext is the provider id the caller named, "" when none (or
 // when it named several: an ambiguous request names none).
 func providerFromContext(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return ""
-	}
+	// A context with no metadata gives a nil MD, whose Get answers nothing.
+	md, _ := metadata.FromIncomingContext(ctx)
 	v := md.Get(protocol.MetadataProvider)
 	if len(v) != 1 {
 		return ""
