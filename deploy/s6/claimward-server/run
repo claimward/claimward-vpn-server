@@ -16,7 +16,7 @@
 exec 2>&1
 
 # Non-secret configuration, in a file the service user may read (no secret
-# here): WG_ENDPOINT=..., AUTH_PROVIDER=..., GITHUB_ALLOWED_ORGS=...
+# here): WG_ENDPOINT=..., AUTH_PROVIDER=..., GITHUB_ALLOWED_ORGS=..., GITHUB_CLIENT_ID=...
 set -a
 [ -r /etc/claimward/env ] && . /etc/claimward/env
 set +a

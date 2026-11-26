@@ -18,6 +18,9 @@ RestartSec=5
 # an ACL gives the service's user read access; the server accepts exactly that.
 # Create them with `systemd-creds encrypt` (see deploy/README.md).
 LoadCredentialEncrypted=wg-private-key:/etc/credstore.encrypted/claimward.wg-private-key
+# AUTH_PROVIDER=github (the default) needs the OAuth app's client secret: only
+# tokens that app minted are admitted. Remove this line for another provider.
+LoadCredentialEncrypted=github-client-secret:/etc/credstore.encrypted/claimward.github-client-secret
 # Add the ones your configuration needs; a missing file stops the unit.
 #   AUTH_PROVIDER=go-authn      goauthn-gateway-secret
 #   a tenant with `members`     github-token
@@ -30,6 +33,9 @@ LoadCredentialEncrypted=wg-private-key:/etc/credstore.encrypted/claimward.wg-pri
 Environment=WG_ENDPOINT=vpn.example.org:51820
 Environment=AUTH_PROVIDER=github
 Environment=GITHUB_ALLOWED_ORGS=example-org
+# The client ID of Claimward's GitHub OAuth app (public); its secret is the
+# github-client-secret credential above.
+Environment=GITHUB_CLIENT_ID=Iv1.0123456789abcdef
 Environment=WG_INTERFACE=wg0
 # /metrics is OFF unless this is set (no default port, so nothing clashes with
 # Prometheus on :9090). It names every tenant: keep it on loopback or a

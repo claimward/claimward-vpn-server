@@ -12,6 +12,7 @@
 // Required environment:
 //
 //	WG_ENDPOINT      public host:port of the WireGuard gateway
+//	GITHUB_CLIENT_ID the OAuth app's client ID (AUTH_PROVIDER=github, the default)
 //	OIDC_ISSUER      OIDC issuer URL         (AUTH_PROVIDER=oidc or go-authn)
 //	OIDC_CLIENT_ID   expected token audience (AUTH_PROVIDER=oidc or go-authn)
 //	GOAUTHN_GATEWAY_CLIENT_ID
@@ -24,6 +25,8 @@
 //	admin-token              enables the admin API/WebUI (optional)
 //	goauthn-gateway-secret   the gateway client's secret (AUTH_PROVIDER=go-authn)
 //	github-token             required when a tenant names members
+//	github-client-secret     the OAuth app's client secret (AUTH_PROVIDER=github,
+//	                         with GITHUB_CLIENT_ID): only that app's tokens are admitted
 //
 // See internal/config for the full list. Set WG_DRYRUN=true to run without a
 // real WireGuard device (local development).
@@ -99,12 +102,14 @@ func run(log *slog.Logger, link *privsep.Client) error {
 
 	ts := tenant.New(cfg.PushRoutes, cfg.DNS)
 	verifier, err := auth.New(ctx, auth.Options{
-		Provider:          cfg.AuthProvider,
-		Issuer:            cfg.OIDCIssuer,
-		ClientID:          cfg.OIDCClientID,
-		AllowedDomains:    cfg.AllowedDomains,
-		GitHubAPIURL:      cfg.GitHubAPIURL,
-		GitHubAllowedOrgs: cfg.GitHubAllowedOrgs,
+		Provider:           cfg.AuthProvider,
+		Issuer:             cfg.OIDCIssuer,
+		ClientID:           cfg.OIDCClientID,
+		AllowedDomains:     cfg.AllowedDomains,
+		GitHubAPIURL:       cfg.GitHubAPIURL,
+		GitHubAllowedOrgs:  cfg.GitHubAllowedOrgs,
+		GitHubClientID:     cfg.GitHubClientID,
+		GitHubClientSecret: cfg.GitHubClientSecret,
 	})
 	if err != nil {
 		return err

@@ -54,6 +54,12 @@ type Config struct {
 	SSF         bool
 	SSFInterval time.Duration
 
+	// GitHubClientID (GITHUB_CLIENT_ID, public) and GitHubClientSecret (the
+	// credential file github-client-secret) are Claimward's OAuth app, required
+	// with the github provider: only tokens that app minted are admitted.
+	GitHubClientID     string
+	GitHubClientSecret string
+
 	GitHubAPIURL      string   // default https://api.github.com (set for GHE)
 	GitHubAllowedOrgs []string // org-membership allowlist (github); required with the github provider
 	WGInterface       string   // kernel interface managed via wgctrl, e.g. "wg0"
@@ -95,6 +101,7 @@ func Load() (*Config, error) {
 		OIDCClientID:         os.Getenv("OIDC_CLIENT_ID"),
 		AllowedDomains:       splitCSV(os.Getenv("OIDC_ALLOWED_DOMAINS")),
 		GitHubAPIURL:         os.Getenv("GITHUB_API_URL"),
+		GitHubClientID:       os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubAllowedOrgs:    splitCSV(os.Getenv("GITHUB_ALLOWED_ORGS")),
 		WGInterface:          env("WG_INTERFACE", "wg0"),
 		WGEndpoint:           os.Getenv("WG_ENDPOINT"),
@@ -140,6 +147,14 @@ func Load() (*Config, error) {
 		// nor tenants naming members EVERY GitHub account would be let in. The
 		// allowlist is optional only when tenants have members, which Load
 		// cannot see: the server checks it after seeding the tenants.
+		//
+		// Likewise a token must come from OUR OAuth app, or a token minted by
+		// any other app a member authorised would enrol a peer: no client ID or
+		// no secret file, no start, and no flag to say otherwise.
+		required["GITHUB_CLIENT_ID"] = c.GitHubClientID
+		if c.GitHubClientSecret, err = creds.Read(dir, creds.GitHubClientSecret); err != nil {
+			return nil, fmt.Errorf("required credential (AUTH_PROVIDER=github, the OAuth app's client secret): %w", err)
+		}
 	case "oidc":
 		required["OIDC_ISSUER"] = c.OIDCIssuer
 		required["OIDC_CLIENT_ID"] = c.OIDCClientID

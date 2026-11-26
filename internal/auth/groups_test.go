@@ -21,9 +21,9 @@ func TestGitHubOrganisationsAreGroups(t *testing.T) {
 	mux.HandleFunc("GET /user/memberships/orgs/univ-a-hpc", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"state": "active"})
 	})
-	api := httptest.NewServer(mux)
+	api := httptest.NewServer(appCheck(42, mux))
 	defer api.Close()
-	c, err := NewGitHubVerifier(api.URL, []string{"univ-a-hpc"}).Verify(context.Background(), "token")
+	c, err := appVerifierOrgs(api.URL, "univ-a-hpc").Verify(context.Background(), "token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,9 +37,9 @@ func TestGitHubOrganisationsAreGroups(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"id": 42, "login": "carol"})
 	})
 	mux2.HandleFunc("GET /user/orgs", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) })
-	api2 := httptest.NewServer(mux2)
+	api2 := httptest.NewServer(appCheck(42, mux2))
 	defer api2.Close()
-	if _, err := NewGitHubVerifier(api2.URL, []string{"univ-a-hpc"}).Verify(context.Background(), "token"); err == nil {
+	if _, err := appVerifierOrgs(api2.URL, "univ-a-hpc").Verify(context.Background(), "token"); err == nil {
 		t.Error("a person whose organisations could not be read was let in")
 	}
 }

@@ -23,6 +23,8 @@ services:
       WG_ENDPOINT: vpn.example.org:51820
       AUTH_PROVIDER: github
       GITHUB_ALLOWED_ORGS: example-org
+      # Claimward's GitHub OAuth app (public client ID; the secret is a file below):
+      GITHUB_CLIENT_ID: Iv1.0123456789abcdef
       # /metrics is off unless this is set (it names every tenant; keep it private):
       # METRICS_ADDR: 127.0.0.1:9100
     secrets:
@@ -33,6 +35,8 @@ services:
       - source: wg-private-key
         mode: 0400
         uid: "65532"
+      # AUTH_PROVIDER=github (this example) needs the OAuth app's client secret:
+      - { source: github-client-secret, mode: 0400, uid: "65532" }
       # - { source: goauthn-gateway-secret, mode: 0400, uid: "65532" }
       # - { source: github-token,           mode: 0400, uid: "65532" }
       # - { source: admin-token,            mode: 0400, uid: "65532" }
@@ -41,6 +45,8 @@ services:
 secrets:
   wg-private-key:
     file: ./secrets/wg-private-key
+  github-client-secret:
+    file: ./secrets/github-client-secret
   # goauthn-gateway-secret:
   #   file: ./secrets/goauthn-gateway-secret
   # github-token:

@@ -50,6 +50,11 @@ tasks:
           mkdir -p "$CREDENTIALS_DIRECTORY"
           [ -e "$CREDENTIALS_DIRECTORY/wg-private-key" ] || openssl rand -base64 32 > "$CREDENTIALS_DIRECTORY/wg-private-key"
           chmod 0400 "$CREDENTIALS_DIRECTORY/wg-private-key"
+          # the github provider admits only tokens of Claimward's OAuth app: a
+          # placeholder id and secret start the server; no real login works with them
+          export GITHUB_CLIENT_ID="${GITHUB_CLIENT_ID:-Iv1.dev}"
+          [ -e "$CREDENTIALS_DIRECTORY/github-client-secret" ] || echo dev-secret > "$CREDENTIALS_DIRECTORY/github-client-secret"
+          chmod 0400 "$CREDENTIALS_DIRECTORY/github-client-secret"
           echo "dry-run server on $LISTEN_ADDR (auth=$AUTH_PROVIDER, endpoint=$WG_ENDPOINT)"
           go run ./cmd/claimward-server
         silent: true

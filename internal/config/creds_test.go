@@ -27,7 +27,10 @@ func TestCredentialsHappyPath(t *testing.T) {
 		"wg-private-key": "c2VydmVy\n",
 		"admin-token":    "adm\n",
 		"github-token":   "ghp\n",
+
+		"github-client-secret": "app\n",
 	})
+	t.Setenv("GITHUB_CLIENT_ID", "Iv1.ourapp")
 	t.Setenv("WG_ENDPOINT", "vpn.example.org:51820")
 	t.Setenv("GITHUB_ALLOWED_ORGS", "acme")
 	c, err := Load()

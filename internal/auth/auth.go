@@ -59,13 +59,17 @@ type Options struct {
 	// GitHub
 	GitHubAPIURL      string // default https://api.github.com
 	GitHubAllowedOrgs []string
+	// GitHubClientID and GitHubClientSecret are Claimward's OAuth app: only
+	// tokens that app minted are admitted.
+	GitHubClientID     string
+	GitHubClientSecret string
 }
 
 // New builds the configured Verifier.
 func New(ctx context.Context, opts Options) (Verifier, error) {
 	switch opts.Provider {
 	case "", "github":
-		return NewGitHubVerifier(opts.GitHubAPIURL, opts.GitHubAllowedOrgs), nil
+		return NewGitHubVerifier(opts.GitHubAPIURL, opts.GitHubAllowedOrgs).WithApp(opts.GitHubClientID, opts.GitHubClientSecret), nil
 	case "oidc":
 		return NewOIDCVerifier(ctx, opts.Issuer, opts.ClientID, opts.AllowedDomains)
 	case "go-authn":

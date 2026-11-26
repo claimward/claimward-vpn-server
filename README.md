@@ -310,6 +310,7 @@ names are fixed, and one trailing newline is trimmed:
 | `admin-token` | no | bearer of the admin API/WebUI; **without the file the admin API is disabled** |
 | `goauthn-gateway-secret` | `AUTH_PROVIDER=go-authn` | the gateway client's secret |
 | `github-token` | when any tenant has `members` | bearer for `GET /users/{login}` (see *Named members*) |
+| `github-client-secret` | `AUTH_PROVIDER=github` | the client secret of Claimward's GitHub OAuth app (see `GITHUB_CLIENT_ID`) |
 
 A missing required file stops the start and names the file. Before reading,
 each file is checked through its open descriptor (`O_NOFOLLOW`, then `fstat`):
@@ -355,7 +356,8 @@ owned by the service user, which the server accepts. See
 |-----|----------|---------|-------|
 | `AUTH_PROVIDER` | | `github` | identity provider: `github`, `oidc` or `go-authn` |
 | `GITHUB_ALLOWED_ORGS` | github | — | CSV org-membership allowlist. With `AUTH_PROVIDER=github` it is **optional only when at least one tenant has `members`**; with neither the server refuses to start, with no opt-out, and the verifier refuses every token (an empty gate would admit any GitHub account). A GitHub identity is admitted if it is in an allowed org OR is a named member of a tenant |
-| `GITHUB_API_URL` | | `https://api.github.com` | set for GitHub Enterprise |
+| `GITHUB_CLIENT_ID` | when `github` | — | client ID (public) of Claimward's GitHub OAuth app. Only tokens **that app** minted are admitted: the server asks GitHub ([Check a token](https://docs.github.com/en/rest/apps/oauth-applications#check-a-token), `POST /applications/{client_id}/token`, basic auth with the `github-client-secret` file) before trusting one, so a token another OAuth app holds cannot enrol a peer. No client ID or no secret file, no start; no opt-out. **Upgrade note (v0.12.0, breaking):** existing GitHub deployments must add this variable and the `github-client-secret` file |
+| `GITHUB_API_URL` | | `https://api.github.com` | set for GitHub Enterprise (the token check and the client secret go to this URL: https only, or loopback) |
 | `OIDC_ISSUER` | when `oidc` or `go-authn` | — | issuer URL (discovery) |
 | `OIDC_CLIENT_ID` | when `oidc` or `go-authn` | — | expected token audience |
 | `OIDC_ALLOWED_DOMAINS` | | — | CSV email-domain allowlist (oidc authz); only an address the IdP marks `email_verified` counts |

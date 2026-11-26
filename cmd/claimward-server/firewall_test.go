@@ -68,6 +68,10 @@ func runEnv(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "wg-private-key"), []byte("YPnXq6Z6cBZ7bmF3ZyYh8mEYV0Q1qS6mQH2k6jH6s3A=\n"), 0o400); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "github-client-secret"), []byte("app-secret\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITHUB_CLIENT_ID", "Iv1.ourapp")
 	t.Setenv("CREDENTIALS_DIRECTORY", dir)
 	t.Setenv("LISTEN_ADDR", "127.0.0.1:0")
 	t.Setenv("GRPC_ADDR", "127.0.0.1:0")
