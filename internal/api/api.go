@@ -134,6 +134,7 @@ func New(cfg *config.Config, v auth.Verifier, alloc *ipam.Allocator, st *store.S
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+protocol.PathHealthz, s.handleHealthz)
+	mux.HandleFunc("GET "+protocol.PathWellKnownConfiguration, s.handleConfiguration)
 	mux.Handle("POST "+protocol.PathEnroll, s.authenticated(s.handleEnroll))
 	mux.Handle("POST "+protocol.PathHeartbeat, s.authenticated(s.handleHeartbeat))
 	mux.Handle("POST "+protocol.PathDeregister, s.authenticated(s.handleDeregister))
@@ -208,6 +209,41 @@ func (s *Server) chooseTenant(asked string, claims *auth.Claims) (string, int, [
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleConfiguration serves the public discovery document at
+// /.well-known/claimward-configuration, so a client can learn, before it
+// signs in, which provider to use, the public client IDs, and whether the
+// server is exclusive.
+//
+// RFC 8615 section 3: the name is one path segment under /.well-known/, at the
+// root of the path; section 3.1 asks for it to be registered with IANA (not
+// done: this is the application's own name, "claimward-configuration");
+// section 4.2 advises X-Content-Type-Options: nosniff.
+// RFC 8414 section 3.1: retrieved with HTTP GET (the mux refuses every other
+// method with a 405); section 3.2: a 200 whose body is a JSON object, with a
+// claim that has no value omitted rather than sent empty.
+// Neither RFC says anything on caching: the document changes only when the
+// server restarts with new configuration, so it may be cached for five minutes.
+// A browser page on another origin gets no CORS header and so cannot read it.
+//
+// ⛔ It is unauthenticated, so it is built field by field from public values:
+// never from the whole Config, which holds secrets.
+func (s *Server) handleConfiguration(w http.ResponseWriter, _ *http.Request) {
+	doc := protocol.Configuration{
+		Version:    protocol.ConfigurationVersion,
+		ServerName: s.cfg.ServerName,
+		Provider:   s.cfg.AuthProvider,
+		Exclusive:  s.cfg.Exclusive,
+	}
+	if s.cfg.AuthProvider == "github" {
+		doc.GitHubClientID = s.cfg.GitHubClientID
+	} else {
+		doc.OIDCIssuer, doc.OIDCClientID = s.cfg.OIDCIssuer, s.cfg.OIDCClientID
+	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	writeJSON(w, http.StatusOK, doc)
 }
 
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *auth.Claims) {

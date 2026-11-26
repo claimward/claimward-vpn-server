@@ -30,6 +30,7 @@ shapes are defined in
 | `POST /api/v1/deregister` | Remove the peer |
 | `GET /api/v1/tenants` | The tenants the caller may connect to (see [Tenants](#tenants)) |
 | `GET /healthz` | Liveness |
+| `GET /.well-known/claimward-configuration` | Public discovery document, no authentication: `version`, `server_name` (only when set), `provider`, the public client IDs (`github_client_id`, or `oidc_issuer` and `oidc_client_id`) and `exclusive`. Public values only, never a secret. Served as `application/json` with `X-Content-Type-Options: nosniff` and `Cache-Control: public, max-age=300`; any method but GET is a 405 ([RFC 8615](https://www.rfc-editor.org/rfc/rfc8615), [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414) section 3) |
 | `GET /metrics` | Prometheus exposition — on the separate `METRICS_ADDR` listener, not this port |
 
 ## Flow
@@ -377,6 +378,8 @@ owned by the service user, which the server accepts. See
 | `LEASE_TTL` | | `24h` | lease duration without heartbeat |
 | `TUNNEL_MTU` | | derived | MTU of the gateway's WireGuard interface, set by the server at start and advertised to clients as `mtu` in the enroll response. Unset: the uplink's MTU minus 80, capped at 1420 and floored at 1280 (1420 when the uplink cannot be read). Set: a whole number from 1280 to 9000, anything else stops the start. Clients lower it further to fit their own path. The same table `inet claimward` also clamps the MSS of every TCP SYN crossing the interface (forward both ways, and input for the gateway host itself) to this MTU minus 40 (IPv4) or 60 (IPv6), so a connection never announces a segment the tunnel cannot carry. Needs `CAP_NET_ADMIN` (the gateway already holds it); not applied under `WG_DRYRUN` |
 | `MAX_DEVICES_PER_SUBJECT` | | `5` | most devices one account may have enrolled at once (a further new key gets 429 `too_many_devices`) |
+| `SERVER_NAME` | | none | display name published in the discovery document (`/.well-known/claimward-configuration`). Up to 100 characters, no control characters; unset means the document carries no name (none is invented) |
+| `SERVER_EXCLUSIVE` | | `false` | published in the discovery document: this server refuses to share the machine with other Claimward tunnels; clients refuse to connect it alongside others, and refuse others while it is connected. `true` or `false`; anything else stops the start |
 | `LISTEN_ADDR` | | `:8443` | HTTP control-plane listen address |
 | `GRPC_ADDR` | | `:8444` | RouteService gRPC listen address |
 | `METRICS_ADDR` | | off | where `/metrics` is served, on its own listener. Unset means no metrics at all (there is no default port to clash with another service, `:9090` being Prometheus' own); set it to `127.0.0.1:9100`, say. It names every tenant: expose it only on a trusted network |
