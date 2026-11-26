@@ -310,6 +310,7 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 		body, _ := json.Marshal(protocol.EnrollRequest{PublicKey: key})
 		req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8443"+protocol.PathEnroll, bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+prov.AccessToken("sub-alice", "alice", map[string]any{"idp": "https://idp.example/idp"}))
+		req.Header.Set(protocol.HeaderProvider, "fed")
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

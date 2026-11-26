@@ -148,8 +148,10 @@ func (s *Set) Verify(ctx context.Context, id, bearer string) (*Claims, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.Provider = id
-	return c, nil
+	// Stamp a copy: a verifier may hand the same *Claims to concurrent calls.
+	out := *c
+	out.Provider = id
+	return &out, nil
 }
 
 // Authenticator verifies a bearer token issued by the named provider.
