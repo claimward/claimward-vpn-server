@@ -165,13 +165,32 @@ func TestGitHubCheckTokenCannotBeAskedRefuses(t *testing.T) {
 	s := httptest.NewServer(http.NotFoundHandler())
 	url := s.URL
 	s.Close()
-	if _, err := appVerifier(url).Verify(context.Background(), "t"); err == nil {
+	if err := noPanic(t, func() error {
+		_, err := appVerifier(url).Verify(context.Background(), "t")
+		return err
+	}); err == nil {
 		t.Error("an unreachable GitHub admitted a token")
 	}
 	var noCtx context.Context
-	if _, err := appVerifier("http://127.0.0.1:1").checkApp(noCtx, "t"); err == nil {
+	if err := noPanic(t, func() error {
+		_, err := appVerifier("http://127.0.0.1:1").checkApp(noCtx, "t")
+		return err
+	}); err == nil {
 		t.Error("a request that cannot be built admitted a token")
 	}
+}
+
+// noPanic runs f and turns a panic into a test FAILURE: a panicking test ends
+// the whole test binary, so a guard held only by a panic is held by luck.
+func noPanic(t *testing.T, f func() error) (err error) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("panicked instead of refusing: %v", r)
+			err = nil
+		}
+	}()
+	return f()
 }
 
 // A verifier with no app configured refuses everything, before asking GitHub.
