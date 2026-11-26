@@ -15,7 +15,9 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/claimward/claimward-vpn-server/internal/tenant"
@@ -23,9 +25,19 @@ import (
 
 // Claims is the subset of identity we care about, normalized across providers.
 type Claims struct {
-	// Subject is a stable, provider-scoped identifier, e.g. "github:1234" or the
-	// OIDC "sub". It is what peer ownership is keyed on.
-	Subject       string
+	// Provider is the id (PROVIDERS_FILE) of the provider that verified the
+	// token; Set.Verify fills it in.
+	Provider string
+	// Subject is a stable, provider-scoped identifier: "github:1234" for GitHub,
+	// "<issuer>#<sub>" for an OIDC or go-authn issuer. It is namespaced so that
+	// one identity provider can never speak for another's people (two issuers
+	// may both have a "sub" of "42"), and by the ISSUER, not the local id, so
+	// renaming a provider's id changes no identity. It is what peer ownership
+	// is keyed on.
+	Subject string
+	// Native is the provider's own subject, un-namespaced: what a go-authn
+	// provider's list of registered keys calls the person. Empty otherwise.
+	Native        string
 	Email         string
 	EmailVerified bool
 	Login         string // human handle (GitHub login / OIDC preferred_username), best-effort
@@ -69,17 +81,78 @@ type Options struct {
 func New(ctx context.Context, opts Options) (Verifier, error) {
 	switch opts.Provider {
 	case "", "github":
-		return NewGitHubVerifier(opts.GitHubAPIURL, opts.GitHubAllowedOrgs).WithApp(opts.GitHubClientID, opts.GitHubClientSecret), nil
+		v := NewGitHubVerifier(opts.GitHubAPIURL, opts.GitHubAllowedOrgs).WithApp(opts.GitHubClientID, opts.GitHubClientSecret)
+		if opts.GitHubAPIURL != "" && strings.TrimRight(opts.GitHubAPIURL, "/") != "https://api.github.com" {
+			v.WithEnterprise(opts.GitHubAPIURL)
+		}
+		return v, nil
 	case "oidc":
 		return NewOIDCVerifier(ctx, opts.Issuer, opts.ClientID, opts.AllowedDomains)
 	case "go-authn":
 		return NewGoAuthnVerifier(ctx, opts.Issuer, opts.ClientID)
 	default:
-		return nil, fmt.Errorf("unknown AUTH_PROVIDER %q (want \"github\", \"oidc\" or \"go-authn\")", opts.Provider)
+		return nil, fmt.Errorf("unknown provider kind %q (want \"github\", \"oidc\" or \"go-authn\")", opts.Provider)
 	}
 }
 
 // Tenancy is what tenants are matched on, from these claims.
 func (c *Claims) Tenancy() tenant.Member {
-	return tenant.Member{Subject: c.Subject, Email: c.Email, EmailVerified: c.EmailVerified, Groups: c.Groups, IdP: c.IdP}
+	// ⛔ Groups are scoped by the provider: "acme" the GitHub organisation and
+	// "acme" a group of another provider are two groups. A tenant names one as
+	// "<provider id>:<group>".
+	groups := make([]string, len(c.Groups))
+	for i, g := range c.Groups {
+		groups[i] = c.Provider + ":" + g
+	}
+	return tenant.Member{Subject: c.Subject, Provider: c.Provider, Email: c.Email, EmailVerified: c.EmailVerified, Groups: groups, IdP: c.IdP}
+}
+
+// Errors of Set.Verify that name the provider, not the token.
+var (
+	ErrMissingProvider = errors.New("no provider named: send the Claimward-Provider header")
+	ErrUnknownProvider = errors.New("unknown provider")
+)
+
+// Set is the providers a server accepts, by id.
+type Set struct {
+	byID map[string]Verifier
+}
+
+// NewSet returns an empty Set.
+func NewSet() *Set { return &Set{byID: map[string]Verifier{}} }
+
+// Add registers v under id; an id used twice is an error.
+func (s *Set) Add(id string, v Verifier) error {
+	if _, dup := s.byID[id]; dup {
+		return fmt.Errorf("provider %q added twice", id)
+	}
+	s.byID[id] = v
+	return nil
+}
+
+// Get is the verifier of provider id.
+func (s *Set) Get(id string) (Verifier, bool) { v, ok := s.byID[id]; return v, ok }
+
+// Verify checks bearer with the provider id ONLY. ⛔ It never tries the token
+// against the others: that would send a GitHub token to an OIDC endpoint, and
+// let the token of a weaker provider be tried as another's.
+func (s *Set) Verify(ctx context.Context, id, bearer string) (*Claims, error) {
+	if id == "" {
+		return nil, ErrMissingProvider
+	}
+	v, ok := s.byID[id]
+	if !ok {
+		return nil, ErrUnknownProvider
+	}
+	c, err := v.Verify(ctx, bearer)
+	if err != nil {
+		return nil, err
+	}
+	c.Provider = id
+	return c, nil
+}
+
+// Authenticator verifies a bearer token issued by the named provider.
+type Authenticator interface {
+	Verify(ctx context.Context, provider, bearer string) (*Claims, error)
 }

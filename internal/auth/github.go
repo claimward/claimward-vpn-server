@@ -23,6 +23,7 @@ type GitHubVerifier struct {
 	allowedOrgs []string
 	http        *http.Client
 	members     MemberSet
+	enterprise  string // host of a GitHub Enterprise API; empty = github.com
 
 	clientID     string // OAuth app client ID (public)
 	clientSecret string // OAuth app client secret, from a credential file
@@ -58,11 +59,11 @@ func (v *GitHubVerifier) Verify(ctx context.Context, token string) (*Claims, err
 	// an open relay. Config.Load refuses this too; here it holds for any
 	// caller that builds a verifier by hand.
 	if !v.hasAllowedOrg() && (v.members == nil || !v.members.HasNamedMembers()) {
-		return nil, fmt.Errorf("github authentication needs an organisation allowlist (GITHUB_ALLOWED_ORGS) or tenants with named members")
+		return nil, fmt.Errorf("github authentication needs an organisation allowlist (allowed_orgs in the providers file) or tenants with named members")
 	}
 	// ⛔ Fail closed: a token is only taken from Claimward's own OAuth app.
 	if v.clientID == "" || v.clientSecret == "" {
-		return nil, fmt.Errorf("github authentication needs the OAuth app (GITHUB_CLIENT_ID and the github-client-secret credential)")
+		return nil, fmt.Errorf("github authentication needs the OAuth app (github_client_id in the providers file and the provider-<id>-secret credential)")
 	}
 	checkedID, err := v.checkApp(ctx, token)
 	if err != nil {
@@ -84,7 +85,7 @@ func (v *GitHubVerifier) Verify(ctx context.Context, token string) (*Claims, err
 	}
 
 	claims := &Claims{
-		Subject:       fmt.Sprintf("github:%d", user.ID),
+		Subject:       fmt.Sprintf("%s:%d", v.subjectPrefix(), user.ID),
 		Login:         user.Login,
 		Email:         user.Email,
 		EmailVerified: user.Email != "", // GitHub only exposes verified emails on /user
@@ -109,6 +110,28 @@ func (v *GitHubVerifier) Verify(ctx context.Context, token string) (*Claims, err
 		return nil, fmt.Errorf("user %q is neither a named tenant member nor in an allowed org", user.Login)
 	}
 	return claims, nil
+}
+
+// subjectPrefix is "github" for github.com, the namespace the tenants' pinned
+// members live in. A GitHub Enterprise server numbers its accounts on its own:
+// its IDs get their own namespace, "github@<host>", so ID 1234 there is never
+// ID 1234 on github.com.
+func (v *GitHubVerifier) subjectPrefix() string {
+	if v.enterprise == "" {
+		return "github"
+	}
+	return "github@" + v.enterprise
+}
+
+// WithEnterprise puts the verifier's identities in the namespace of a GitHub
+// Enterprise server (its API URL's host), apart from github.com's.
+func (v *GitHubVerifier) WithEnterprise(apiURL string) *GitHubVerifier {
+	if u, err := url.Parse(apiURL); err == nil && u.Host != "" {
+		v.enterprise = u.Host
+	} else {
+		v.enterprise = apiURL
+	}
+	return v
 }
 
 // maxCheckBody caps what is read of a check-a-token answer.

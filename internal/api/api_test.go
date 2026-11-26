@@ -23,6 +23,9 @@ import (
 	"github.com/go-authn/wireguard"
 )
 
+// testProvider is the id the test server's one provider goes by.
+const testProvider = "test"
+
 // tokens is a verifier whose bearer tokens are the people's names.
 type tokens map[string]*auth.Claims
 
@@ -54,7 +57,11 @@ func newServer(t *testing.T) (*Server, *store.Store) {
 	if err := ts.Seed(tenant.Tenant{ID: tenant.DefaultID, Name: "Default", Domains: []string{"example.org"}, AllowedIPs: []string{cfg.VPNCIDR}}); err != nil {
 		t.Fatal(err)
 	}
-	return New(cfg, people, alloc, st, wg.NewDryRunGateway(log), ts, metrics.New(st, ts), "c2VydmVy", log), st
+	set := auth.NewSet()
+	if err := set.Add(testProvider, people); err != nil {
+		t.Fatal(err)
+	}
+	return New(cfg, set, alloc, st, wg.NewDryRunGateway(log), ts, metrics.New(st, ts), "c2VydmVy", log), st
 }
 
 func call(t *testing.T, h http.Handler, path, bearer string, body any) *httptest.ResponseRecorder {
@@ -62,9 +69,8 @@ func call(t *testing.T, h http.Handler, path, bearer string, body any) *httptest
 	b, _ := json.Marshal(body)
 	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(b)))
 	r.Header.Set("Authorization", "Bearer "+bearer)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	return w
+	r.Header.Set(protocol.HeaderProvider, testProvider)
+	return serve(t, h, r)
 }
 
 const aliceKey = "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw="
@@ -126,7 +132,14 @@ func TestOnlyARegisteredKeyIsEnrolled(t *testing.T) {
 	h := s.Handler()
 	until := time.Now().Add(20 * time.Minute).Truncate(time.Second)
 	reg := fixed{aliceKey: {Key: mustKey(t, aliceKey), Subject: "sub-alice", Expires: until}}
-	s.UsePeers(reg)
+	// The people of a go-authn provider: "<issuer>#<sub>", and the provider's own
+	// sub (Native), which is what its registry names.
+	const issuer = "https://authn.example.org"
+	oldAlice, oldBob := people["alice"], people["bob"]
+	t.Cleanup(func() { people["alice"], people["bob"] = oldAlice, oldBob })
+	people["alice"] = &auth.Claims{Subject: issuer + "#sub-alice", Native: "sub-alice", Email: "alice@example.org", EmailVerified: true}
+	people["bob"] = &auth.Claims{Subject: issuer + "#sub-bob", Native: "sub-bob", Email: "bob@example.org", EmailVerified: true}
+	s.UsePeers(reg, testProvider, issuer)
 
 	const unregistered = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
 	if w := call(t, h, protocol.PathEnroll, "alice", protocol.EnrollRequest{PublicKey: unregistered}); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "key_not_registered") {
@@ -176,8 +189,8 @@ func tenantServer(t *testing.T) (*Server, *store.Store, *tenant.Store) {
 	t.Helper()
 	s, st := newServer(t)
 	for _, in := range []tenant.Tenant{
-		{ID: "chem", Name: "Chemistry", Groups: []string{"chem"}, AllowedIPs: []string{"10.1.0.0/16"}},
-		{ID: "hpc", Name: "HPC", Groups: []string{"hpc"}, AllowedIPs: []string{"10.2.0.0/16"}},
+		{ID: "chem", Name: "Chemistry", Groups: []string{testProvider + ":chem"}, AllowedIPs: []string{"10.1.0.0/16"}},
+		{ID: "hpc", Name: "HPC", Groups: []string{testProvider + ":hpc"}, AllowedIPs: []string{"10.2.0.0/16"}},
 	} {
 		if _, err := s.tenants.Create(in); err != nil {
 			t.Fatal(err)
@@ -193,9 +206,8 @@ func get(t *testing.T, h http.Handler, path, bearer string) *httptest.ResponseRe
 	t.Helper()
 	r := httptest.NewRequest(http.MethodGet, path, nil)
 	r.Header.Set("Authorization", "Bearer "+bearer)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	return w
+	r.Header.Set(protocol.HeaderProvider, testProvider)
+	return serve(t, h, r)
 }
 
 // A person in several tenants is offered them, must choose, and gets the

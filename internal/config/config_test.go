@@ -27,9 +27,18 @@ func baseEnv(t *testing.T) {
 	t.Helper()
 	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy\n"})
 	t.Setenv("WG_ENDPOINT", "vpn.example.org:51820")
-	t.Setenv("AUTH_PROVIDER", "oidc")
-	t.Setenv("OIDC_ISSUER", "https://idp.example.org")
-	t.Setenv("OIDC_CLIENT_ID", "claimward")
+	providersFile(t, `{"providers":[{"id":"campus","kind":"oidc","name":"Campus","oidc_issuer":"https://idp.example.org","oidc_client_id":"claimward"}]}`)
+}
+
+// providersFile writes content as PROVIDERS_FILE and returns its path.
+func providersFile(t *testing.T, content string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "providers.json")
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROVIDERS_FILE", p)
+	return p
 }
 
 func TestTunnelMTU(t *testing.T) {

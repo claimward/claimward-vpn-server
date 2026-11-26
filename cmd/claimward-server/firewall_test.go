@@ -68,15 +68,21 @@ func runEnv(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "wg-private-key"), []byte("YPnXq6Z6cBZ7bmF3ZyYh8mEYV0Q1qS6mQH2k6jH6s3A=\n"), 0o400); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "github-client-secret"), []byte("app-secret\n"), 0o400); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "provider-hub-secret"), []byte("app-secret\n"), 0o400); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GITHUB_CLIENT_ID", "Iv1.ourapp")
 	t.Setenv("CREDENTIALS_DIRECTORY", dir)
 	t.Setenv("LISTEN_ADDR", "127.0.0.1:0")
 	t.Setenv("GRPC_ADDR", "127.0.0.1:0")
 	t.Setenv("METRICS_ADDR", "127.0.0.1:0")
-	t.Setenv("GITHUB_ALLOWED_ORGS", "claimward")
+	providersFile(t, `["claimward"]`)
+}
+
+// providersFile points PROVIDERS_FILE at one github provider, "hub", with the
+// given JSON list of allowed organisations.
+func providersFile(t *testing.T, orgs string) {
+	t.Helper()
+	t.Setenv("PROVIDERS_FILE", writeFile(t, `{"providers":[{"id":"hub","kind":"github","name":"GitHub","github_client_id":"Iv1.ourapp","allowed_orgs":`+orgs+`}]}`))
 }
 
 func TestRunRefusesABadTenantsFile(t *testing.T) {
@@ -96,7 +102,7 @@ func TestRunRefusesABadTenantsFile(t *testing.T) {
 // ⛔ No orgs and no named members: run itself refuses, with no opt-out.
 func TestRunRefusesAnOpenGitHubGate(t *testing.T) {
 	runEnv(t)
-	t.Setenv("GITHUB_ALLOWED_ORGS", "")
+	providersFile(t, `[]`)
 	stop := time.AfterFunc(3*time.Second, func() {
 		if p, err := os.FindProcess(os.Getpid()); err == nil {
 			_ = p.Signal(os.Interrupt)

@@ -178,11 +178,11 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 	}
 	keyCred := "/etc/claimward/credentials/wg-private-key"
 	must(t, "install", "-m", "0400", "-o", childUser, "-g", childUser, src, keyCred)
-	gwSecret := filepath.Join(tmp, "goauthn-gateway-secret")
+	gwSecret := filepath.Join(tmp, "provider-fed-gateway-secret")
 	if err := os.WriteFile(gwSecret, []byte(fakeauthn.GatewaySecret+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	must(t, "install", "-m", "0400", "-o", childUser, "-g", childUser, gwSecret, "/etc/claimward/credentials/goauthn-gateway-secret")
+	must(t, "install", "-m", "0400", "-o", childUser, "-g", childUser, gwSecret, "/etc/claimward/credentials/provider-fed-gateway-secret")
 
 	// A go-authn provider in this process, which knows one device and one
 	// institution; the tenant names the institution.
@@ -209,9 +209,14 @@ func TestRcdScriptStartsChecksStopsAndRefusesWithoutTheAnchor(t *testing.T) {
 		t.Fatal(err)
 	}
 	envFile := filepath.Join(tmp, "environment")
+	providers := filepath.Join(tmp, "providers.json")
+	pj := `{"providers":[{"id":"fed","kind":"go-authn","name":"Federation","oidc_issuer":"` + prov.Issuer() + `","oidc_client_id":"` + fakeauthn.Audience + `","gateway_client_id":"` + fakeauthn.GatewayID + `"}]}`
+	if err := os.WriteFile(providers, []byte(pj), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	must(t, "install", "-m", "0400", "-o", childUser, "-g", childUser, providers, "/etc/claimward/providers.json")
 	extra := "LISTEN_ADDR=127.0.0.1:8443\nGRPC_ADDR=127.0.0.1:8444\n" +
-		"AUTH_PROVIDER=go-authn\nOIDC_ISSUER=" + prov.Issuer() + "\nOIDC_CLIENT_ID=" + fakeauthn.Audience + "\n" +
-		"GOAUTHN_GATEWAY_CLIENT_ID=" + fakeauthn.GatewayID + "\nTENANTS_FILE=/etc/claimward/tenants.json\n"
+		"PROVIDERS_FILE=/etc/claimward/providers.json\nTENANTS_FILE=/etc/claimward/tenants.json\n"
 	if err := os.WriteFile(envFile, append(env, extra...), 0o600); err != nil {
 		t.Fatal(err)
 	}

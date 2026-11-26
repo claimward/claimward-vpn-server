@@ -3,8 +3,9 @@
 # Create the Secret from files, never from a manifest in git:
 #   kubectl create secret generic claimward-credentials \
 #     --from-file=wg-private-key=./wg-private-key \
-#     --from-file=github-client-secret=./github-client-secret
-#   (add --from-file=github-token=..., admin-token=..., goauthn-gateway-secret=...)
+#     --from-file=provider-hub-secret=./provider-hub-secret
+#   (add --from-file=github-token=..., admin-token=..., provider-<id>-gateway-secret=...)
+#   kubectl create configmap claimward-providers --from-file=providers.json=./providers.json
 #
 # The pod does NOT run as root. A Secret volume is tmpfs; its files belong to
 # ROOT, with the group set by fsGroup, and the mode by defaultMode. The server
@@ -61,11 +62,10 @@ spec:
           env:
             - {name: CREDENTIALS_DIRECTORY, value: /run/credentials}
             - {name: WG_ENDPOINT, value: "vpn.example.org:51820"}
-            - {name: AUTH_PROVIDER, value: github}
-            - {name: GITHUB_ALLOWED_ORGS, value: example-org}
-            # Claimward's GitHub OAuth app (public client ID); its secret is the
-            # github-client-secret file of the Secret:
-            - {name: GITHUB_CLIENT_ID, value: Iv1.0123456789abcdef}
+            # The identity providers: deploy/providers.example.json as a ConfigMap
+            # (no secret in it); each github provider's OAuth app secret is the
+            # provider-<id>-secret file of the Secret.
+            - {name: PROVIDERS_FILE, value: /etc/claimward/providers.json}
             # /metrics is off unless METRICS_ADDR is set (it names every tenant):
             # - {name: METRICS_ADDR, value: "0.0.0.0:9100"}
           securityContext:
@@ -76,7 +76,11 @@ spec:
               add: [NET_ADMIN] # needs the file capability on the binary, see above
           volumeMounts:
             - {name: credentials, mountPath: /run/credentials, readOnly: true}
+            - {name: providers, mountPath: /etc/claimward, readOnly: true}
       volumes:
+        - name: providers
+          configMap:
+            name: claimward-providers # kubectl create configmap claimward-providers --from-file=providers.json
         - name: credentials
           secret:
             secretName: claimward-credentials

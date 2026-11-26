@@ -41,15 +41,15 @@ func watch(t *testing.T, srv *Server, c *auth.Claims, key string) (*stream, erro
 func TestWatchStreamsTheTenantOfTheSession(t *testing.T) {
 	ts := tenant.New([]string{"10.80.0.0/24"}, nil)
 	for _, in := range []tenant.Tenant{
-		{ID: "chem", Groups: []string{"chem"}, AllowedIPs: []string{"10.1.0.0/16"}},
-		{ID: "hpc", Groups: []string{"hpc"}, AllowedIPs: []string{"10.2.0.0/16"}},
+		{ID: "chem", Groups: []string{"t:chem"}, AllowedIPs: []string{"10.1.0.0/16"}},
+		{ID: "hpc", Groups: []string{"t:hpc"}, AllowedIPs: []string{"10.2.0.0/16"}},
 	} {
 		ts.Create(in)
 	}
 	peers := store.New()
 	peers.Put(&store.Peer{PublicKey: "carols-laptop", Subject: "sub-carol", Tenant: "hpc"})
 	srv := New(ts, peers)
-	carol := &auth.Claims{Subject: "sub-carol", Groups: []string{"chem", "hpc"}}
+	carol := &auth.Claims{Provider: "t", Subject: "sub-carol", Groups: []string{"chem", "hpc"}}
 
 	st, err := watch(t, srv, carol, "carols-laptop")
 	if err != nil {
@@ -59,11 +59,11 @@ func TestWatchStreamsTheTenantOfTheSession(t *testing.T) {
 		t.Errorf("carol's laptop, enrolled into hpc, was sent %v", st.sent)
 	}
 	// Somebody else naming carol's key.
-	if _, err := watch(t, srv, &auth.Claims{Subject: "sub-mallory", Groups: []string{"hpc"}}, "carols-laptop"); status.Code(err) != codes.NotFound {
+	if _, err := watch(t, srv, &auth.Claims{Provider: "t", Subject: "sub-mallory", Groups: []string{"hpc"}}, "carols-laptop"); status.Code(err) != codes.NotFound {
 		t.Errorf("another person's key: %v", err)
 	}
 	// Carol taken off hpc.
-	if _, err := watch(t, srv, &auth.Claims{Subject: "sub-carol", Groups: []string{"chem"}}, "carols-laptop"); status.Code(err) != codes.PermissionDenied {
+	if _, err := watch(t, srv, &auth.Claims{Provider: "t", Subject: "sub-carol", Groups: []string{"chem"}}, "carols-laptop"); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("after leaving hpc: %v", err)
 	}
 	// No identity at all.

@@ -40,9 +40,6 @@ tasks:
       - cmd: |
           export WG_DRYRUN=true
           export LISTEN_ADDR="${LISTEN_ADDR:-:8080}"
-          export AUTH_PROVIDER="${AUTH_PROVIDER:-github}"
-          # the github provider requires an org allowlist (no opt-out)
-          export GITHUB_ALLOWED_ORGS="${GITHUB_ALLOWED_ORGS:-claimward}"
           export WG_ENDPOINT="${WG_ENDPOINT:-vpn.local:51820}"
           # secrets are files in the credentials directory, never variables
           export CREDENTIALS_DIRECTORY="${CREDENTIALS_DIRECTORY:-${XDG_STATE_HOME:-$HOME/.local/state}/claimward-dev-creds}"
@@ -50,12 +47,14 @@ tasks:
           mkdir -p "$CREDENTIALS_DIRECTORY"
           [ -e "$CREDENTIALS_DIRECTORY/wg-private-key" ] || openssl rand -base64 32 > "$CREDENTIALS_DIRECTORY/wg-private-key"
           chmod 0400 "$CREDENTIALS_DIRECTORY/wg-private-key"
-          # the github provider admits only tokens of Claimward's OAuth app: a
-          # placeholder id and secret start the server; no real login works with them
-          export GITHUB_CLIENT_ID="${GITHUB_CLIENT_ID:-Iv1.dev}"
-          [ -e "$CREDENTIALS_DIRECTORY/github-client-secret" ] || echo dev-secret > "$CREDENTIALS_DIRECTORY/github-client-secret"
-          chmod 0400 "$CREDENTIALS_DIRECTORY/github-client-secret"
-          echo "dry-run server on $LISTEN_ADDR (auth=$AUTH_PROVIDER, endpoint=$WG_ENDPOINT)"
+          # the github provider admits only tokens of Claimward's OAuth app and
+          # requires an org allowlist (no opt-out): a placeholder id, org and
+          # secret start the server; no real login works with them
+          export PROVIDERS_FILE="$CREDENTIALS_DIRECTORY/providers.json"
+          echo '{"providers":[{"id":"hub","kind":"github","name":"GitHub","github_client_id":"Iv1.dev","allowed_orgs":["claimward"]}]}' > "$PROVIDERS_FILE"
+          [ -e "$CREDENTIALS_DIRECTORY/provider-hub-secret" ] || echo dev-secret > "$CREDENTIALS_DIRECTORY/provider-hub-secret"
+          chmod 0400 "$CREDENTIALS_DIRECTORY/provider-hub-secret"
+          echo "dry-run server on $LISTEN_ADDR (providers=$PROVIDERS_FILE, endpoint=$WG_ENDPOINT)"
           go run ./cmd/claimward-server
         silent: true
 
@@ -75,9 +74,8 @@ tasks:
     desc: Run dry-run, wired to the local Dex (start `task dex` in another shell first)
     cmds:
       - cmd: |
-          export AUTH_PROVIDER=oidc
-          export OIDC_ISSUER="${OIDC_ISSUER:-http://localhost:5556/dex}"
-          export OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-claimward}"
+          OIDC_ISSUER="${OIDC_ISSUER:-http://localhost:5556/dex}"
+          OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-claimward}"
           export WG_DRYRUN=true
           export LISTEN_ADDR="${LISTEN_ADDR:-:8080}"
           export WG_ENDPOINT="${WG_ENDPOINT:-vpn.local:51820}"
@@ -86,6 +84,8 @@ tasks:
           mkdir -p "$CREDENTIALS_DIRECTORY"
           [ -e "$CREDENTIALS_DIRECTORY/wg-private-key" ] || openssl rand -base64 32 > "$CREDENTIALS_DIRECTORY/wg-private-key"
           chmod 0400 "$CREDENTIALS_DIRECTORY/wg-private-key"
+          export PROVIDERS_FILE="$CREDENTIALS_DIRECTORY/providers.json"
+          printf '{"providers":[{"id":"dex","kind":"oidc","name":"Dex","oidc_issuer":"%s","oidc_client_id":"%s"}]}\n' "$OIDC_ISSUER" "$OIDC_CLIENT_ID" > "$PROVIDERS_FILE"
           echo "OIDC dev server on $LISTEN_ADDR (issuer=$OIDC_ISSUER, client=$OIDC_CLIENT_ID)"
           go run ./cmd/claimward-server
         silent: true

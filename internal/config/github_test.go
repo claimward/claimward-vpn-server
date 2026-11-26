@@ -5,13 +5,13 @@ import (
 	"testing"
 )
 
+const githubProvider = `{"providers":[{"id":"gh","kind":"github","name":"GitHub","github_client_id":"Iv1.ourapp","allowed_orgs":[%s]}]}`
+
 func githubEnv(t *testing.T, orgs string) {
 	t.Helper()
-	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy", "github-client-secret": "app-secret"})
-	t.Setenv("GITHUB_CLIENT_ID", "Iv1.ourapp")
+	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy", "provider-gh-secret": "app-secret"})
 	t.Setenv("WG_ENDPOINT", "vpn.example.org:51820")
-	t.Setenv("AUTH_PROVIDER", "")
-	t.Setenv("GITHUB_ALLOWED_ORGS", orgs)
+	providersFile(t, strings.Replace(githubProvider, "%s", orgs, 1))
 }
 
 // The allowlist is optional when tenants name members, so Load accepts none;
@@ -22,41 +22,40 @@ func TestGitHubAllowlistIsOptionalAtLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.GitHubAllowedOrgs) != 0 {
-		t.Errorf("orgs = %v", c.GitHubAllowedOrgs)
+	if len(c.Providers[0].AllowedOrgs) != 0 {
+		t.Errorf("orgs = %v", c.Providers[0].AllowedOrgs)
 	}
 }
 
 func TestGitHubWithOrgsIsAccepted(t *testing.T) {
-	githubEnv(t, "acme, other")
+	githubEnv(t, `"acme"," other ",""`)
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.GitHubAllowedOrgs) != 2 {
-		t.Errorf("orgs = %v", c.GitHubAllowedOrgs)
+	if got := c.Providers[0].AllowedOrgs; len(got) != 2 || got[1] != "other" {
+		t.Errorf("orgs = %q", got)
 	}
 }
 
-// ⛔ The OAuth app is mandatory with the github provider, no opt-out: without
+// ⛔ The OAuth app is mandatory with a github provider, no opt-out: without
 // the client ID, or without the secret file, Load refuses.
 func TestGitHubRequiresTheOAuthApp(t *testing.T) {
-	githubEnv(t, "acme")
+	githubEnv(t, `"acme"`)
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.GitHubClientID != "Iv1.ourapp" || c.GitHubClientSecret != "app-secret" {
-		t.Errorf("app = %q / secret read = %v", c.GitHubClientID, c.GitHubClientSecret != "")
+	if p := c.Providers[0]; p.GitHubClientID != "Iv1.ourapp" || p.ClientSecret != "app-secret" {
+		t.Errorf("app = %q / secret read = %v", p.GitHubClientID, p.ClientSecret != "")
 	}
 
-	githubEnv(t, "acme")
-	t.Setenv("GITHUB_CLIENT_ID", "")
-	refuses(t, "GITHUB_CLIENT_ID")
+	providersFile(t, `{"providers":[{"id":"gh","kind":"github","name":"GitHub","allowed_orgs":["acme"]}]}`)
+	refuses(t, "github_client_id")
 
+	githubEnv(t, `"acme"`)
 	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy"})
-	t.Setenv("GITHUB_CLIENT_ID", "Iv1.ourapp")
-	refuses(t, "github-client-secret")
+	refuses(t, "provider-gh-secret")
 }
 
 func refuses(t *testing.T, want string) {
@@ -70,12 +69,9 @@ func refuses(t *testing.T, want string) {
 	}
 }
 
-// Other providers are not subject to the GitHub rule.
+// Other kinds are not subject to the GitHub rule.
 func TestOIDCNeedsNoGitHubAllowlist(t *testing.T) {
-	githubEnv(t, "")
-	t.Setenv("AUTH_PROVIDER", "oidc")
-	t.Setenv("OIDC_ISSUER", "https://idp.example.org")
-	t.Setenv("OIDC_CLIENT_ID", "claimward")
+	baseEnv(t)
 	if _, err := Load(); err != nil {
 		t.Fatal(err)
 	}

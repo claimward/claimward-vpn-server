@@ -1,7 +1,7 @@
 # Podman Quadlet: copy to /etc/containers/systemd/ (or ~/.config/containers/systemd/)
 # and `systemctl daemon-reload`. Create the secrets first:
 #   podman secret create claimward-wg-private-key wg-private-key
-#   podman secret create claimward-github-client-secret github-client-secret
+#   podman secret create claimward-provider-hub-secret provider-hub-secret
 #
 # The image is published on every tag, signed with cosign (keyless); see the
 # `cosign verify` line in deploy/compose/compose.yaml.
@@ -21,17 +21,17 @@ ReadOnly=true
 User=65532
 Environment=CREDENTIALS_DIRECTORY=/run/secrets
 Environment=WG_ENDPOINT=vpn.example.org:51820
-Environment=AUTH_PROVIDER=github
-Environment=GITHUB_ALLOWED_ORGS=example-org
-# Claimward's GitHub OAuth app (public client ID; the secret is a Secret= below):
-Environment=GITHUB_CLIENT_ID=Iv1.0123456789abcdef
+# The identity providers (deploy/providers.example.json), no secret in it; each
+# github provider's OAuth app secret is a Secret= below.
+Environment=PROVIDERS_FILE=/etc/claimward/providers.json
+Volume=/etc/claimward/providers.json:/etc/claimward/providers.json:ro
 # /metrics is off unless this is set (it names every tenant; keep it private):
 #Environment=METRICS_ADDR=127.0.0.1:9100
 # The secret files must be owned by the container's uid, mode 0400, and be
 # named for the credential: target= sets the file name under /run/secrets.
 Secret=claimward-wg-private-key,type=mount,target=wg-private-key,uid=65532,mode=0400
-Secret=claimward-github-client-secret,type=mount,target=github-client-secret,uid=65532,mode=0400
-#Secret=claimward-goauthn-gateway-secret,type=mount,target=goauthn-gateway-secret,uid=65532,mode=0400
+Secret=claimward-provider-hub-secret,type=mount,target=provider-hub-secret,uid=65532,mode=0400
+#Secret=claimward-provider-fed-gateway-secret,type=mount,target=provider-fed-gateway-secret,uid=65532,mode=0400
 #Secret=claimward-github-token,type=mount,target=github-token,uid=65532,mode=0400
 #Secret=claimward-admin-token,type=mount,target=admin-token,uid=65532,mode=0400
 

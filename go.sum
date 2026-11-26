@@ -6,6 +6,8 @@ github.com/claimward/claimward-vpn-client v0.6.0 h1:w9qD4Xq1hV8we54Yx0w4H+kbhw+m
 github.com/claimward/claimward-vpn-client v0.6.0/go.mod h1:UrVwbbdaN/uunykUvV4mqjBNDyQx4xWiwkflbP5XvXE=
 github.com/claimward/claimward-vpn-client v0.8.0 h1:C3N4C0JjnDAz5uGeyVQ04QCDxd3s4JmoZNdyFlvzaI0=
 github.com/claimward/claimward-vpn-client v0.8.0/go.mod h1:UrVwbbdaN/uunykUvV4mqjBNDyQx4xWiwkflbP5XvXE=
+github.com/claimward/claimward-vpn-client v0.9.0 h1:GQ6CM8rqLkuBv/WE8wgJ7q/7deW6yVDf+aQvwdlZbBM=
+github.com/claimward/claimward-vpn-client v0.9.0/go.mod h1:UrVwbbdaN/uunykUvV4mqjBNDyQx4xWiwkflbP5XvXE=
 github.com/coreos/go-oidc/v3 v3.21.0 h1:wZo4Q9Pum8dYEj0eMUPrqR+kvuGkeUplbLpNCkBqoWM=
 github.com/coreos/go-oidc/v3 v3.21.0/go.mod h1:DYCf24+ncYi+XkIH97GY1+dqoRlbaSI26KVTCI9SrY4=
 github.com/go-authn/oidc v0.4.3 h1:H2L1YtpwGQCMoc65vhH5wLPM+09Wygh/32hjtYI052k=

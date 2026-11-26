@@ -17,8 +17,9 @@ policy, the MTU and the privilege separation.
 
 Enrollment requests carry the user's bearer credential as
 `Authorization: Bearer <token>` — a **GitHub OAuth access token** (default
-provider), an **OIDC ID token** (`AUTH_PROVIDER=oidc`), or a go-authn
-**access token** (`AUTH_PROVIDER=go-authn`, see [With go-authn](#with-go-authn)). Request/response
+provider), an **OIDC ID token** (an `oidc` provider), or a go-authn
+**access token** (a `go-authn` provider, see [With go-authn](#with-go-authn));
+the `Claimward-Provider` header names which (see [Identity providers](#identity-providers-providers_file)). Request/response
 shapes are defined in
 [`claimward-vpn-client/pkg/protocol`](https://github.com/claimward/claimward-vpn-client/tree/main/pkg/protocol)
 — the single shared source of truth.
@@ -67,7 +68,7 @@ power to deregister its owner's device.
 
 ## With go-authn
 
-With `AUTH_PROVIDER=go-authn`, [go-authn/bridge](https://github.com/go-authn/bridge)
+With a `go-authn` provider, [go-authn/bridge](https://github.com/go-authn/bridge)
 is the identity provider: an OpenID Connect provider in front of a SAML
 federation (RENATER, eduGAIN), which also keeps **whose each WireGuard key
 is**. A valid token is no longer enough to enroll:
@@ -76,7 +77,7 @@ is**. A valid token is no longer enough to enroll:
    `openid wireguard`) and registers its device's **public** key there
    (`POST /wireguard/key`). The private key never leaves the device;
 2. it refreshes for `scope=openid`, which gives an access token addressed to
-   this server (`OIDC_CLIENT_ID`), and calls `/api/v1/enroll` with it;
+   this server (`oidc_client_id`), and calls `/api/v1/enroll` with it;
 3. the server enrolls the key only if the provider's list has it **registered
    by the same subject**. Otherwise it answers `403 key_not_registered`. A
    lease never outlives the key's registration.
@@ -309,9 +310,9 @@ names are fixed, and one trailing newline is trimmed:
 |------|----------|---------|
 | `wg-private-key` | always | base64 WireGuard server key |
 | `admin-token` | no | bearer of the admin API/WebUI; **without the file the admin API is disabled** |
-| `goauthn-gateway-secret` | `AUTH_PROVIDER=go-authn` | the gateway client's secret |
+| `provider-<id>-gateway-secret` | a `go-authn` provider `<id>` | the gateway client's secret |
 | `github-token` | when any tenant has `members` | bearer for `GET /users/{login}` (see *Named members*) |
-| `github-client-secret` | `AUTH_PROVIDER=github` | the client secret of Claimward's GitHub OAuth app (see `GITHUB_CLIENT_ID`) |
+| `provider-<id>-secret` | a `github` provider `<id>` | the client secret of Claimward's GitHub OAuth app (see `github_client_id`) |
 
 A missing required file stops the start and names the file. Before reading,
 each file is checked through its open descriptor (`O_NOFOLLOW`, then `fstat`):
@@ -351,18 +352,59 @@ owned by the service user, which the server accepts. See
 [`deploy/s6/`](deploy/s6/claimward-server/run); CI starts it under a real
 `s6-svscan` and checks `CapEff == 0x1000`. This server does not depend on it.
 
+## Identity providers (`PROVIDERS_FILE`)
+
+One server can accept several identity providers at once. They are listed in a
+JSON file (unknown fields are refused, 1 MiB at most; it holds no secret):
+
+```json
+{"providers":[
+  {"id":"campus","kind":"oidc","name":"Campus","oidc_issuer":"https://idp.example.org","oidc_client_id":"claimward","allowed_domains":["example.org"]},
+  {"id":"hub","kind":"github","name":"GitHub","github_client_id":"Iv1.0123456789abcdef","allowed_orgs":["example-org"]}
+]}
+```
+
+| `kind` | Fields | Secret file |
+|--------|--------|-------------|
+| `github` | `github_client_id`, `allowed_orgs`, `api_url` (optional) | `provider-<id>-secret` |
+| `oidc` | `oidc_issuer`, `oidc_client_id`, `allowed_domains` | none |
+| `go-authn` | `oidc_issuer`, `oidc_client_id`, `gateway_client_id` (one provider of this kind at most) | `provider-<id>-gateway-secret` |
+
+Every provider has an `id` (the name a client sends and that prefixes groups)
+and a display `name`. The client names its provider in the
+**`Claimward-Provider`** request header (gRPC metadata `claimward-provider`);
+the server verifies the token **only** against that provider, so a token of A
+never passes when the request names B. A missing header is `401
+missing_provider`, an unknown id `401 unknown_provider`. The public discovery
+document (`/.well-known/claimward-configuration`, version 2) lists every
+provider (id, kind, name, public client IDs; never a secret) with the server
+name, `exclusive` and the logo.
+
+Identities are scoped by provider: an OIDC or go-authn subject is
+`<issuer>#<sub>`, so the same `sub` from two issuers is two identities; a
+GitHub one is `github:<id>`. In `tenants.json`, groups are written
+`<provider id>:<group>`; with several providers a tenant that uses `domains` or
+`idps` must name its `providers` (otherwise the server refuses to start).
+
+The logo (`SERVER_LOGO_FILE`) is served unauthenticated at
+`/.well-known/claimward-logo.svg` with `Content-Type: image/svg+xml`,
+`X-Content-Type-Options: nosniff`, a `Content-Security-Policy` of
+`default-src 'none'; style-src 'unsafe-inline'; sandbox`, an `ETag` (sha256) and
+`304` on `If-None-Match`; 404 when no logo is set.
+
+**Upgrade note (v0.14.0, breaking):** write the file, set `PROVIDERS_FILE`,
+unset the old variables (the server refuses to start while one is set), rename
+`github-client-secret` to `provider-<id>-secret` and `goauthn-gateway-secret` to
+`provider-<id>-gateway-secret`, and prefix tenant groups with the provider id.
+Clients need claimward-vpn-client v0.9.0 or later.
+
 ## Configuration (environment)
 
 | Var | Required | Default | Notes |
 |-----|----------|---------|-------|
-| `AUTH_PROVIDER` | | `github` | identity provider: `github`, `oidc` or `go-authn` |
-| `GITHUB_ALLOWED_ORGS` | github | — | CSV org-membership allowlist. With `AUTH_PROVIDER=github` it is **optional only when at least one tenant has `members`**; with neither the server refuses to start, with no opt-out, and the verifier refuses every token (an empty gate would admit any GitHub account). A GitHub identity is admitted if it is in an allowed org OR is a named member of a tenant |
-| `GITHUB_CLIENT_ID` | when `github` | — | client ID (public) of Claimward's GitHub OAuth app. Only tokens **that app** minted are admitted: the server asks GitHub ([Check a token](https://docs.github.com/en/rest/apps/oauth-applications#check-a-token), `POST /applications/{client_id}/token`, basic auth with the `github-client-secret` file) before trusting one, so a token another OAuth app holds cannot enrol a peer. No client ID or no secret file, no start; no opt-out. **Upgrade note (v0.12.0, breaking):** existing GitHub deployments must add this variable and the `github-client-secret` file |
-| `GITHUB_API_URL` | | `https://api.github.com` | set for GitHub Enterprise (the token check and the client secret go to this URL: https only, or loopback) |
-| `OIDC_ISSUER` | when `oidc` or `go-authn` | — | issuer URL (discovery) |
-| `OIDC_CLIENT_ID` | when `oidc` or `go-authn` | — | expected token audience |
-| `OIDC_ALLOWED_DOMAINS` | | — | CSV email-domain allowlist (oidc authz); only an address the IdP marks `email_verified` counts |
-| `GOAUTHN_GATEWAY_CLIENT_ID` | when `go-authn` | — | this gateway's own client at the go-authn provider (`wireguard_peers`) |
+| `PROVIDERS_FILE` | ✅ | — | JSON file of the identity providers, see *Identity providers* below. **v0.14.0, breaking:** `AUTH_PROVIDER`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_ALLOWED_DOMAINS`, `GITHUB_CLIENT_ID`, `GITHUB_ALLOWED_ORGS` and `GOAUTHN_GATEWAY_CLIENT_ID` are refused at start |
+| `SERVER_LOGO_FILE` | | none | an SVG logo shown by clients, validated at start (`svgsafe`, 64 KiB at most; a refused file stops the start), served at `/.well-known/claimward-logo.svg` |
+| `GITHUB_API_URL` | | `https://api.github.com` | API used to resolve the named members of tenants (the `github-token` goes to this URL: https only, or loopback). A github provider's own `api_url` is set in the providers file |
 | `GOAUTHN_PEER_LIST_INTERVAL` | | `30s` | how often the list of registered keys is fetched |
 | `GOAUTHN_SSF` | | `false` | also listen to the provider's Shared Signals (poll), so a disabling is acted on at once; the gateway's client must be an SSF receiver there |
 | `GOAUTHN_SSF_INTERVAL` | | `5s` | how often the SSF stream is polled |
@@ -396,9 +438,10 @@ ephemeral key, `task dex` + `task run:dev:oidc` against a local Dex, see
 is touched:
 
 ```sh
-export AUTH_PROVIDER=oidc                                   # or default `github`
-export OIDC_ISSUER=https://accounts.google.com
-export OIDC_CLIENT_ID=xxxx.apps.googleusercontent.com
+export PROVIDERS_FILE=$HOME/.local/state/claimward-dev-providers.json
+cat > "$PROVIDERS_FILE" <<'EOF'
+{"providers":[{"id":"google","kind":"oidc","name":"Google","oidc_issuer":"https://accounts.google.com","oidc_client_id":"xxxx.apps.googleusercontent.com"}]}
+EOF
 export WG_ENDPOINT=vpn.example.com:51820
 export CREDENTIALS_DIRECTORY=$HOME/.local/state/claimward-dev-creds
 (umask 077; mkdir -p "$CREDENTIALS_DIRECTORY"; wg genkey > "$CREDENTIALS_DIRECTORY/wg-private-key")
