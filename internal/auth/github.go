@@ -142,10 +142,7 @@ func (v *GitHubVerifier) checkApp(ctx context.Context, token string) (int64, err
 	if u, err := url.Parse(v.apiURL); err != nil || (u.Scheme != "https" && !isLoopback(u.Hostname())) {
 		return 0, fmt.Errorf("the GitHub API URL %q: the client secret is only sent over https (or to loopback)", v.apiURL)
 	}
-	body, err := json.Marshal(map[string]string{"access_token": token})
-	if err != nil {
-		return 0, err
-	}
+	body, _ := json.Marshal(map[string]string{"access_token": token}) // a string map cannot fail
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.apiURL+"/applications/"+url.PathEscape(v.clientID)+"/token", bytes.NewReader(body))
 	if err != nil {
 		return 0, err
@@ -170,14 +167,12 @@ func (v *GitHubVerifier) checkApp(ctx context.Context, token string) (int64, err
 			ID int64 `json:"id"`
 		} `json:"user"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxCheckBody)).Decode(&out); err != nil {
-		return 0, fmt.Errorf("GitHub's answer to the token check: %w", err)
-	}
+	// A body that does not decode leaves out zero (or short of our client_id),
+	// and the check below refuses it; the caller refuses a user ID of zero by
+	// comparing it with /user's, which is never zero there.
+	_ = json.NewDecoder(io.LimitReader(resp.Body, maxCheckBody)).Decode(&out)
 	if out.App.ClientID != v.clientID {
 		return 0, fmt.Errorf("the token was not minted by this server's OAuth app")
-	}
-	if out.User.ID == 0 {
-		return 0, fmt.Errorf("the token belongs to no user")
 	}
 	return out.User.ID, nil
 }

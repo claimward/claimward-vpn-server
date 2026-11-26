@@ -118,13 +118,59 @@ func TestGitHubCheckTokenUserMustMatchTheUserEndpoint(t *testing.T) {
 			w.Write([]byte(`{"app":{"client_id":"` + testClientID + `"},"user":{"id":7}}`))
 		case "/user":
 			w.Write([]byte(`{"id":424242,"login":"x"}`))
-		default:
+		case "/user/orgs":
 			w.Write([]byte(`[]`))
+		default: // the org membership: everything else would admit the token
+			w.Write([]byte(`{"state":"active"}`))
 		}
 	}))
 	defer s.Close()
 	if _, err := appVerifier(s.URL).Verify(context.Background(), "t"); err == nil {
 		t.Error("a check-token user different from /user was admitted")
+	}
+}
+
+// Only a 200 vouches: an error status is refused even when its body reads like
+// a good answer, and the org membership would admit the person.
+func TestGitHubCheckTokenErrorStatusWithAGoodBodyRefuses(t *testing.T) {
+	s := httptest.NewServer(appCheckStatus(http.StatusUnprocessableEntity, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/user":
+			w.Write([]byte(`{"id":424242,"login":"x"}`))
+		case "/user/orgs":
+			w.Write([]byte(`[]`))
+		default:
+			w.Write([]byte(`{"state":"active"}`))
+		}
+	})))
+	defer s.Close()
+	if _, err := appVerifier(s.URL).Verify(context.Background(), "t"); err == nil {
+		t.Error("a 422 carrying an app and a user admitted a token")
+	}
+}
+
+func appCheckStatus(status int, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/applications/"+testClientID+"/token" {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"app": map[string]any{"client_id": testClientID}, "user": map[string]any{"id": 424242}})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// GitHub unreachable, or no context to ask with: refused, never admitted.
+func TestGitHubCheckTokenCannotBeAskedRefuses(t *testing.T) {
+	s := httptest.NewServer(http.NotFoundHandler())
+	url := s.URL
+	s.Close()
+	if _, err := appVerifier(url).Verify(context.Background(), "t"); err == nil {
+		t.Error("an unreachable GitHub admitted a token")
+	}
+	var noCtx context.Context
+	if _, err := appVerifier("http://127.0.0.1:1").checkApp(noCtx, "t"); err == nil {
+		t.Error("a request that cannot be built admitted a token")
 	}
 }
 
