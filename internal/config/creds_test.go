@@ -28,11 +28,10 @@ func TestCredentialsHappyPath(t *testing.T) {
 		"admin-token":    "adm\n",
 		"github-token":   "ghp\n",
 
-		"github-client-secret": "app\n",
+		"provider-gh-secret": "app\n",
 	})
-	t.Setenv("GITHUB_CLIENT_ID", "Iv1.ourapp")
 	t.Setenv("WG_ENDPOINT", "vpn.example.org:51820")
-	t.Setenv("GITHUB_ALLOWED_ORGS", "acme")
+	providersFile(t, `{"providers":[{"id":"gh","kind":"github","name":"GitHub","github_client_id":"Iv1.ourapp","allowed_orgs":["acme"]}]}`)
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +47,7 @@ func TestRemovedEnvRefused(t *testing.T) {
 		"ADMIN_TOKEN":                 "admin-token",
 		"WG_PRIVATE_KEY":              "wg-private-key",
 		"WG_PRIVATE_KEY_FILE":         "wg-private-key",
-		"GOAUTHN_GATEWAY_SECRET_FILE": "goauthn-gateway-secret",
+		"GOAUTHN_GATEWAY_SECRET_FILE": "provider-<id>-gateway-secret",
 	} {
 		t.Run(env, func(t *testing.T) {
 			baseEnv(t)
@@ -74,13 +73,12 @@ func TestMissingRequiredCredentialNamesTheFile(t *testing.T) {
 
 func TestGoAuthnNeedsItsSecret(t *testing.T) {
 	baseEnv(t)
-	t.Setenv("AUTH_PROVIDER", "go-authn")
-	t.Setenv("GOAUTHN_GATEWAY_CLIENT_ID", "gw")
-	loadErr(t, "goauthn-gateway-secret")
+	providersFile(t, `{"providers":[{"id":"ga","kind":"go-authn","name":"Campus","oidc_issuer":"https://idp.example.org","oidc_client_id":"claimward","gateway_client_id":"gw"}]}`)
+	loadErr(t, "provider-ga-gateway-secret")
 
-	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy", "goauthn-gateway-secret": "s3\n"})
+	credsDir(t, map[string]string{"wg-private-key": "c2VydmVy", "provider-ga-gateway-secret": "s3\n"})
 	c, err := Load()
-	if err != nil || c.GatewaySecret != "s3" {
+	if err != nil || c.Providers[0].GatewaySecret != "s3" {
 		t.Fatalf("%v %+v", err, c)
 	}
 }

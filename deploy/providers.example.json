@@ -1,0 +1,11 @@
+{
+  "providers": [
+    {
+      "id": "hub",
+      "kind": "github",
+      "name": "GitHub",
+      "github_client_id": "Iv1.0123456789abcdef",
+      "allowed_orgs": ["example-org"]
+    }
+  ]
+}

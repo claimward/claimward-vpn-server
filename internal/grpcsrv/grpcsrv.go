@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/claimward/claimward-vpn-client/pkg/protocol"
 	"github.com/claimward/claimward-vpn-client/pkg/routespb"
 	"github.com/claimward/claimward-vpn-server/internal/auth"
 	"github.com/claimward/claimward-vpn-server/internal/store"
@@ -136,13 +137,16 @@ func toProto(s tenant.RouteSet) *routespb.RouteUpdate {
 
 // AuthStreamInterceptor verifies the bearer (gRPC metadata) and stashes the
 // caller's claims in the stream context.
-func AuthStreamInterceptor(v auth.Verifier) grpc.StreamServerInterceptor {
+//
+// The provider is named in the "claimward-provider" metadata
+// (protocol.MetadataProvider), and the token is checked by that provider only.
+func AuthStreamInterceptor(v auth.Authenticator) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		tok := bearerFromContext(ss.Context())
 		if tok == "" {
 			return status.Error(codes.Unauthenticated, "missing bearer token")
 		}
-		claims, err := v.Verify(ss.Context(), tok)
+		claims, err := v.Verify(ss.Context(), providerFromContext(ss.Context()), tok)
 		if err != nil {
 			return status.Error(codes.Unauthenticated, "invalid token: "+err.Error())
 		}
@@ -157,6 +161,18 @@ type wrappedStream struct {
 }
 
 func (w *wrappedStream) Context() context.Context { return w.ctx }
+
+// providerFromContext is the provider id the caller named, "" when none (or
+// when it named several: an ambiguous request names none).
+func providerFromContext(ctx context.Context) string {
+	// A context with no metadata gives a nil MD, whose Get answers nothing.
+	md, _ := metadata.FromIncomingContext(ctx)
+	v := md.Get(protocol.MetadataProvider)
+	if len(v) != 1 {
+		return ""
+	}
+	return v[0]
+}
 
 func bearerFromContext(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)

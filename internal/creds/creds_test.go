@@ -171,13 +171,31 @@ func TestRefusesOversize(t *testing.T) {
 }
 
 func TestMissingIsNotFound(t *testing.T) {
-	_, err := Read(t.TempDir(), GoAuthnGatewaySecret)
-	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "goauthn-gateway-secret") {
+	_, err := Read(t.TempDir(), ProviderGatewaySecret("campus"))
+	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "provider-campus-gateway-secret") {
 		t.Fatalf("got %v", err)
 	}
-	_, err = Read("", GoAuthnGatewaySecret)
+	_, err = Read("", ProviderSecret("gh"))
 	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), EnvDir+" is not set") {
 		t.Fatalf("unset dir: %v", err)
+	}
+}
+
+// A provider's secret names are the fixed shape and nothing wider: no path,
+// no dot, no empty id.
+func TestProviderNames(t *testing.T) {
+	for _, n := range []string{"provider-gh-secret", "provider-a-gateway-secret", "provider-my-idp-2-secret"} {
+		if !ValidName(n) {
+			t.Errorf("%q refused", n)
+		}
+	}
+	for _, n := range []string{
+		"provider--secret", "provider-Gh-secret", "provider-../x-secret", "provider-a/b-secret",
+		"provider--a-secret", "provider-a--secret", "provider-a-secret/", "provider-a-gateway", "provider-a-secret\n",
+	} {
+		if ValidName(n) {
+			t.Errorf("%q accepted", n)
+		}
 	}
 }
 

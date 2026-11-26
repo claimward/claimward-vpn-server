@@ -21,10 +21,9 @@ services:
     environment:
       CREDENTIALS_DIRECTORY: /run/secrets
       WG_ENDPOINT: vpn.example.org:51820
-      AUTH_PROVIDER: github
-      GITHUB_ALLOWED_ORGS: example-org
-      # Claimward's GitHub OAuth app (public client ID; the secret is a file below):
-      GITHUB_CLIENT_ID: Iv1.0123456789abcdef
+      # The identity providers (deploy/providers.example.json), mounted below. It
+      # holds no secret; each github provider's OAuth app secret is a file below.
+      PROVIDERS_FILE: /etc/claimward/providers.json
       # /metrics is off unless this is set (it names every tenant; keep it private):
       # METRICS_ADDR: 127.0.0.1:9100
     secrets:
@@ -35,20 +34,23 @@ services:
       - source: wg-private-key
         mode: 0400
         uid: "65532"
-      # AUTH_PROVIDER=github (this example) needs the OAuth app's client secret:
-      - { source: github-client-secret, mode: 0400, uid: "65532" }
-      # - { source: goauthn-gateway-secret, mode: 0400, uid: "65532" }
+      # A github provider (id "hub" here) needs the OAuth app's client secret,
+      # named provider-<id>-secret; a go-authn one provider-<id>-gateway-secret:
+      - { source: provider-hub-secret, mode: 0400, uid: "65532" }
+      # - { source: provider-fed-gateway-secret, mode: 0400, uid: "65532" }
       # - { source: github-token,           mode: 0400, uid: "65532" }
       # - { source: admin-token,            mode: 0400, uid: "65532" }
+    volumes:
+      - ../providers.example.json:/etc/claimward/providers.json:ro
     user: "65532"
 
 secrets:
   wg-private-key:
     file: ./secrets/wg-private-key
-  github-client-secret:
-    file: ./secrets/github-client-secret
-  # goauthn-gateway-secret:
-  #   file: ./secrets/goauthn-gateway-secret
+  provider-hub-secret:
+    file: ./secrets/provider-hub-secret
+  # provider-fed-gateway-secret:
+  #   file: ./secrets/provider-fed-gateway-secret
   # github-token:
   #   file: ./secrets/github-token
   # admin-token:

@@ -12,21 +12,22 @@
 // Required environment:
 //
 //	WG_ENDPOINT      public host:port of the WireGuard gateway
-//	GITHUB_CLIENT_ID the OAuth app's client ID (AUTH_PROVIDER=github, the default)
-//	OIDC_ISSUER      OIDC issuer URL         (AUTH_PROVIDER=oidc or go-authn)
-//	OIDC_CLIENT_ID   expected token audience (AUTH_PROVIDER=oidc or go-authn)
-//	GOAUTHN_GATEWAY_CLIENT_ID
-//	                 the gateway's own client, which reads the list of
-//	                 registered keys          (AUTH_PROVIDER=go-authn)
+//	PROVIDERS_FILE   JSON file listing the identity providers (github, oidc,
+//	                 go-authn; several allowed, one go-authn at most). It holds
+//	                 no secret. The old AUTH_PROVIDER, GITHUB_*, OIDC_* and
+//	                 GOAUTHN_GATEWAY_CLIENT_ID variables are refused.
+//
+// Optional: SERVER_LOGO_FILE, an SVG shown by clients, validated at start and
+// served at /.well-known/claimward-logo.svg.
 //
 // Secrets are files in $CREDENTIALS_DIRECTORY, never environment variables:
 //
 //	wg-private-key           base64 server private key (always)
 //	admin-token              enables the admin API/WebUI (optional)
-//	goauthn-gateway-secret   the gateway client's secret (AUTH_PROVIDER=go-authn)
+//	provider-<id>-gateway-secret  a go-authn provider's gateway client secret
 //	github-token             required when a tenant names members
-//	github-client-secret     the OAuth app's client secret (AUTH_PROVIDER=github,
-//	                         with GITHUB_CLIENT_ID): only that app's tokens are admitted
+//	provider-<id>-secret     a github provider's OAuth app client secret: only
+//	                         that app's tokens are admitted
 //
 // See internal/config for the full list. Set WG_DRYRUN=true to run without a
 // real WireGuard device (local development).
@@ -41,9 +42,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/claimward/claimward-vpn-client/pkg/protocol"
 	"github.com/claimward/claimward-vpn-client/pkg/routespb"
 	"github.com/claimward/claimward-vpn-server/internal/admin"
 	"github.com/claimward/claimward-vpn-server/internal/adminui"
@@ -101,16 +104,7 @@ func run(log *slog.Logger, link *privsep.Client) error {
 	defer stop()
 
 	ts := tenant.New(cfg.PushRoutes, cfg.DNS)
-	verifier, err := auth.New(ctx, auth.Options{
-		Provider:           cfg.AuthProvider,
-		Issuer:             cfg.OIDCIssuer,
-		ClientID:           cfg.OIDCClientID,
-		AllowedDomains:     cfg.AllowedDomains,
-		GitHubAPIURL:       cfg.GitHubAPIURL,
-		GitHubAllowedOrgs:  cfg.GitHubAllowedOrgs,
-		GitHubClientID:     cfg.GitHubClientID,
-		GitHubClientSecret: cfg.GitHubClientSecret,
-	})
+	providers, ids, githubs, goauthnP, err := buildProviders(ctx, cfg.Providers)
 	if err != nil {
 		return err
 	}
@@ -173,13 +167,17 @@ func run(log *slog.Logger, link *privsep.Client) error {
 	// Named members are pinned to their GitHub numeric IDs as the tenants are
 	// loaded; an unresolvable login stops the start.
 	ts.SetResolver(auth.NewGitHubResolver(cfg.GitHubAPIURL, cfg.GitHubToken))
+	// Before the tenants load: a tenant naming an unknown provider, or an
+	// unscoped group, or (with several providers) domains with no providers,
+	// stops the start.
+	ts.SetProviders(ids)
 	if err := loadTenants(ts, cfg.TenantsFile, log); err != nil {
 		return err
 	}
 	if err := checkEntryGate(cfg, ts); err != nil {
 		return err
 	}
-	if gv, ok := verifier.(*auth.GitHubVerifier); ok {
+	for _, gv := range githubs {
 		gv.WithMembers(ts)
 	}
 
@@ -192,14 +190,14 @@ func run(log *slog.Logger, link *privsep.Client) error {
 	}
 
 	m := metrics.New(st, ts)
-	srv := api.New(cfg, verifier, alloc, st, gw, ts, m, serverPub, log)
+	srv := api.New(cfg, providers, alloc, st, gw, ts, m, serverPub, log)
 	srv.UseFirewall(fwm.Sync)
 
 	// go-authn: a device's key must be one its owner registered with the
 	// provider, and a key the provider takes back is dropped here.
-	if cfg.AuthProvider == "go-authn" {
+	if gp := goauthnP; gp != nil {
 		src, err := wireguard.NewSource(ctx, wireguard.SourceConfig{
-			Issuer: cfg.OIDCIssuer, ClientID: cfg.GatewayClientID, ClientSecret: cfg.GatewaySecret,
+			Issuer: gp.OIDCIssuer, ClientID: gp.GatewayClientID, ClientSecret: gp.GatewaySecret,
 		})
 		if err != nil {
 			return err
@@ -211,18 +209,18 @@ func run(log *slog.Logger, link *privsep.Client) error {
 		if _, err := reg.Refresh(ctx); err != nil {
 			return err
 		}
-		srv.UsePeers(reg)
+		srv.UsePeers(reg, gp.ID, gp.OIDCIssuer)
 		// An SSF event -- somebody disabled -- fetches the list now; the
 		// list alone decides what it means.
 		kick := make(chan struct{}, 1)
 		if cfg.SSF {
 			go ssfpoll.New(ssfpoll.Config{
-				Issuer: cfg.OIDCIssuer, ClientID: cfg.GatewayClientID, ClientSecret: cfg.GatewaySecret,
+				Issuer: gp.OIDCIssuer, ClientID: gp.GatewayClientID, ClientSecret: gp.GatewaySecret,
 				Interval: cfg.SSFInterval,
 			}, kick, log).Run(ctx)
 		}
 		go reg.Run(ctx, cfg.PeerListInterval, kick, func(*wireguard.List) { srv.Reconcile(reg.Allowed) }, log)
-		log.Info("go-authn WireGuard registry", "issuer", cfg.OIDCIssuer, "gateway_client", cfg.GatewayClientID, "interval", cfg.PeerListInterval)
+		log.Info("go-authn WireGuard registry", "provider", gp.ID, "issuer", gp.OIDCIssuer, "gateway_client", gp.GatewayClientID, "interval", cfg.PeerListInterval)
 	}
 
 	// gRPC RouteService: streams per-tenant route pushes to clients.
@@ -239,7 +237,7 @@ func run(log *slog.Logger, link *privsep.Client) error {
 	}
 	opts = append(opts, grpcLimits()...)
 	grpcLn = limitConns(grpcLn)
-	gs := grpc.NewServer(append(opts, grpc.StreamInterceptor(grpcsrv.AuthStreamInterceptor(verifier)))...)
+	gs := grpc.NewServer(append(opts, grpc.StreamInterceptor(grpcsrv.AuthStreamInterceptor(providers)))...)
 	routespb.RegisterRouteServiceServer(gs, grpcsrv.New(ts, st))
 	go gs.Serve(grpcLn) //nolint:errcheck
 	go func() {
@@ -304,7 +302,7 @@ func run(log *slog.Logger, link *privsep.Client) error {
 	log.Info("claimward-server listening",
 		"addr", cfg.ListenAddr, "interface", cfg.WGInterface,
 		"endpoint", cfg.WGEndpoint, "vpn_cidr", cfg.VPNCIDR,
-		"auth", cfg.AuthProvider, "server_pubkey", serverPub, "dry_run", cfg.DryRun)
+		"providers", strings.Join(ids, ","), "server_pubkey", serverPub, "dry_run", cfg.DryRun)
 
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
 		err = serveLimited(httpSrv, cfg.TLSCert, cfg.TLSKey)
@@ -323,6 +321,41 @@ func run(log *slog.Logger, link *privsep.Client) error {
 		return nil
 	}
 	return err
+}
+
+// buildProviders turns the providers file's entries into verifiers, in order.
+// It returns the set, the ids, the GitHub verifiers (whose members the tenants
+// are pinned against) and the go-authn provider, if any.
+func buildProviders(ctx context.Context, list []config.Provider) (*auth.Set, []string, []*auth.GitHubVerifier, *config.Provider, error) {
+	providers := auth.NewSet()
+	var ids []string
+	var githubs []*auth.GitHubVerifier
+	var goauthnP *config.Provider
+	for i := range list {
+		p := &list[i]
+		opts := auth.Options{Provider: p.Kind, Issuer: p.OIDCIssuer, ClientID: p.OIDCClientID, AllowedDomains: p.AllowedDomains}
+		if p.Kind == protocol.KindGitHub {
+			// Each GitHub provider is its own OAuth app; the API URL is the
+			// provider's own (GitHub Enterprise), defaulting to github.com.
+			opts.GitHubAPIURL, opts.GitHubAllowedOrgs = p.APIURL, p.AllowedOrgs
+			opts.GitHubClientID, opts.GitHubClientSecret = p.GitHubClientID, p.ClientSecret
+		}
+		v, err := auth.New(ctx, opts)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("provider %q: %w", p.ID, err)
+		}
+		if gv, ok := v.(*auth.GitHubVerifier); ok {
+			githubs = append(githubs, gv)
+		}
+		if p.Kind == protocol.KindGoAuthn {
+			goauthnP = p
+		}
+		if err := providers.Add(p.ID, v); err != nil {
+			return nil, nil, nil, nil, err
+		}
+		ids = append(ids, p.ID)
+	}
+	return providers, ids, githubs, goauthnP, nil
 }
 
 func reaper(ctx context.Context, srv *api.Server, log *slog.Logger) {

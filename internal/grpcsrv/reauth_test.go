@@ -30,7 +30,7 @@ func (s *chanStream) Send(u *routespb.RouteUpdate) error { s.out <- u; return ni
 func open(t *testing.T, claims *auth.Claims, recheck time.Duration) (*tenant.Store, *store.Store, *chanStream, chan error) {
 	t.Helper()
 	ts := tenant.New([]string{"10.80.0.0/24"}, nil)
-	ts.Create(tenant.Tenant{ID: "hpc", Groups: []string{"hpc"}, AllowedIPs: []string{"10.2.0.0/16"}})
+	ts.Create(tenant.Tenant{ID: "hpc", Groups: []string{"t:hpc"}, AllowedIPs: []string{"10.2.0.0/16"}})
 	peers := store.New()
 	peers.Put(&store.Peer{PublicKey: "k", Subject: "sub-carol", Tenant: "hpc"})
 	srv := New(ts, peers)
@@ -49,7 +49,9 @@ func open(t *testing.T, claims *auth.Claims, recheck time.Duration) (*tenant.Sto
 	return ts, peers, st, done
 }
 
-func carol() *auth.Claims { return &auth.Claims{Subject: "sub-carol", Groups: []string{"hpc"}} }
+func carol() *auth.Claims {
+	return &auth.Claims{Provider: "t", Subject: "sub-carol", Groups: []string{"hpc"}}
+}
 
 func TestWatchStopsWhenPeerAndMembershipAreGone(t *testing.T) {
 	ts, peers, st, _ := open(t, carol(), time.Hour)
@@ -69,7 +71,7 @@ func TestWatchStopsWhenPeerAndMembershipAreGone(t *testing.T) {
 func TestWatchPushesNothingToAReapedPeer(t *testing.T) {
 	ts, peers, st, done := open(t, carol(), time.Hour)
 	peers.Delete("k")
-	if _, err := ts.Update("hpc", tenant.Tenant{Groups: []string{"hpc"}, AllowedIPs: []string{"10.2.0.0/16", "10.99.0.0/16"}}); err != nil {
+	if _, err := ts.Update("hpc", tenant.Tenant{Groups: []string{"t:hpc"}, AllowedIPs: []string{"10.2.0.0/16", "10.99.0.0/16"}}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -125,7 +127,7 @@ func TestWatchEndsAtTokenExpiry(t *testing.T) {
 // NotFound, and nothing is sent.
 func TestWatchRefusesATenantDeletedUnderIt(t *testing.T) {
 	ts := tenant.New([]string{"10.80.0.0/24"}, nil)
-	ts.Create(tenant.Tenant{ID: "hpc", Groups: []string{"hpc"}, AllowedIPs: []string{"10.2.0.0/16"}})
+	ts.Create(tenant.Tenant{ID: "hpc", Groups: []string{"t:hpc"}, AllowedIPs: []string{"10.2.0.0/16"}})
 	peers := store.New()
 	peers.Put(&store.Peer{PublicKey: "k", Subject: "sub-carol", Tenant: "hpc"})
 	srv := New(ts, peers)
@@ -143,7 +145,7 @@ func TestWatchRefusesAnExpiredToken(t *testing.T) {
 	c := carol()
 	c.Expires = time.Now().Add(-time.Second)
 	ts := tenant.New([]string{"10.80.0.0/24"}, nil)
-	ts.Create(tenant.Tenant{ID: "hpc", Groups: []string{"hpc"}, AllowedIPs: []string{"10.2.0.0/16"}})
+	ts.Create(tenant.Tenant{ID: "hpc", Groups: []string{"t:hpc"}, AllowedIPs: []string{"10.2.0.0/16"}})
 	peers := store.New()
 	peers.Put(&store.Peer{PublicKey: "k", Subject: "sub-carol", Tenant: "hpc"})
 	st, err := watch(t, New(ts, peers), c, "k")

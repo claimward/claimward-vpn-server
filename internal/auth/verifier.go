@@ -10,6 +10,7 @@ import (
 
 // OIDCVerifier validates OIDC ID tokens against an issuer for a given audience.
 type OIDCVerifier struct {
+	issuer         string
 	verifier       *oidc.IDTokenVerifier
 	allowedDomains []string
 }
@@ -21,6 +22,7 @@ func NewOIDCVerifier(ctx context.Context, issuer, clientID string, allowedDomain
 		return nil, fmt.Errorf("oidc discovery for %q: %w", issuer, err)
 	}
 	return &OIDCVerifier{
+		issuer:         issuer,
 		verifier:       provider.Verifier(&oidc.Config{ClientID: clientID}),
 		allowedDomains: allowedDomains,
 	}, nil
@@ -43,7 +45,7 @@ func (v *OIDCVerifier) Verify(ctx context.Context, rawIDToken string) (*Claims, 
 		return nil, fmt.Errorf("decode claims: %w", err)
 	}
 	claims := &Claims{
-		Subject:       tok.Subject,
+		Subject:       v.issuer + "#" + tok.Subject, // an issuer has no fragment: unambiguous
 		Email:         raw.Email,
 		EmailVerified: raw.EmailVerified,
 		Login:         raw.PreferredUsername,

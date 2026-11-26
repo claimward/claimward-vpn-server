@@ -36,6 +36,10 @@ type Tenant struct {
 	Domains []string `json:"domains"` // verified email domains that are members
 	Groups  []string `json:"groups"`  // groups (token "groups" claim, GitHub orgs) that are members
 	IdPs    []string `json:"idps"`    // institutions (go-authn "idp", a SAML entity ID) that are members
+	// Providers limits which providers' domains and idps count. Empty = any
+	// (refused when the server has several providers and domains/idps are used).
+	// Groups are always "<provider id>:<group>" and so already scoped.
+	Providers []string `json:"providers,omitempty"`
 	// Members are GitHub LOGINS, named one by one. A login can be renamed and
 	// then claimed by somebody else, so the store never matches on it: it
 	// resolves each to the account's numeric ID when the tenant is saved and
@@ -95,6 +99,8 @@ type Store struct {
 
 	onChange func() // after a tenant's policy or existence changes
 	resolver Resolver
+
+	providerIDs map[string]bool // nil until SetProviders
 }
 
 // Resolver turns a GitHub login into the account's numeric ID, or fails: an
@@ -120,6 +126,9 @@ const resolveTimeout = 30 * time.Second
 // pin validates t.Members and pins each login to its numeric ID. The network
 // calls run without the store's lock held.
 func (s *Store) pin(t *Tenant) error {
+	if err := s.checkProviders(t); err != nil {
+		return err
+	}
 	t.Pinned = nil
 	if len(t.Members) == 0 {
 		t.Members = nil
@@ -157,6 +166,44 @@ func (s *Store) pin(t *Tenant) error {
 		pinned[key] = id
 	}
 	t.Members, t.Pinned = logins, pinned
+	return nil
+}
+
+// SetProviders tells the store which provider ids exist and whether there are
+// several. ⛔ With several, a tenant that matches on an email domain or an IdP
+// must say WHICH providers may vouch for it ("providers"): otherwise a provider
+// that lets people type any address would join them to a tenant a stricter
+// provider guards. Fail closed: such a tenant is refused.
+func (s *Store) SetProviders(ids []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.providerIDs = map[string]bool{}
+	for _, id := range ids {
+		s.providerIDs[id] = true
+	}
+}
+
+func (s *Store) checkProviders(t *Tenant) error {
+	s.mu.Lock()
+	ids := s.providerIDs
+	s.mu.Unlock()
+	if ids == nil {
+		return nil
+	}
+	for _, p := range t.Providers {
+		if !ids[p] {
+			return fmt.Errorf("providers: %q is not a configured provider", p)
+		}
+	}
+	for _, g := range t.Groups {
+		p, _, ok := strings.Cut(g, ":")
+		if !ok || !ids[p] {
+			return fmt.Errorf("group %q must be \"<provider id>:<group>\" with a configured provider", g)
+		}
+	}
+	if len(ids) > 1 && len(t.Providers) == 0 && (len(t.Domains) > 0 || len(t.IdPs) > 0) {
+		return fmt.Errorf("with several providers a tenant matching on domains or idps must name its \"providers\"")
+	}
 	return nil
 }
 
@@ -253,6 +300,7 @@ func New(defaultAllowedIPs, defaultDNS []string) *Store {
 // Member is what tenants are matched on: who somebody is, as their token says.
 type Member struct {
 	Subject       string // provider-scoped ID, "github:<id>": what named members are matched on
+	Provider      string // id of the provider that verified the token
 	Email         string
 	EmailVerified bool
 	Groups        []string
@@ -268,7 +316,13 @@ func (t Tenant) has(m Member) bool {
 	if t.names(m.Subject) {
 		return true
 	}
-	if m.EmailVerified {
+	vouches := len(t.Providers) == 0
+	for _, p := range t.Providers {
+		if p == m.Provider {
+			vouches = true
+		}
+	}
+	if m.EmailVerified && vouches {
 		if at := strings.LastIndex(m.Email, "@"); at >= 0 {
 			domain := m.Email[at+1:]
 			for _, d := range t.Domains {
@@ -285,7 +339,7 @@ func (t Tenant) has(m Member) bool {
 			}
 		}
 	}
-	if m.IdP != "" {
+	if m.IdP != "" && vouches {
 		for _, idp := range t.IdPs {
 			if strings.TrimSpace(idp) == m.IdP {
 				return true

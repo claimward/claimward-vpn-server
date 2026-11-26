@@ -17,6 +17,7 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 )
 
 // EnvDir is the variable that names the credentials directory.
@@ -24,12 +25,18 @@ const EnvDir = "CREDENTIALS_DIRECTORY"
 
 // The fixed credential names, and the only ones Read accepts.
 const (
-	GitHubToken          = "github-token"
-	WGPrivateKey         = "wg-private-key"
-	AdminToken           = "admin-token"
-	GoAuthnGatewaySecret = "goauthn-gateway-secret"
-	GitHubClientSecret   = "github-client-secret"
+	GitHubToken  = "github-token"
+	WGPrivateKey = "wg-private-key"
+	AdminToken   = "admin-token"
 )
+
+// A provider's secrets are files named after its id (PROVIDERS_FILE): the
+// OAuth app's client secret of a github provider, the gateway client's secret
+// of a go-authn provider.
+func ProviderSecret(id string) string        { return "provider-" + id + "-secret" }
+func ProviderGatewaySecret(id string) string { return "provider-" + id + "-gateway-secret" }
+
+var providerFile = regexp.MustCompile(`^provider-[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?-(gateway-)?secret$`)
 
 // MaxSize bounds a credential file.
 const MaxSize = 64 << 10
@@ -43,12 +50,16 @@ var readAll = io.ReadAll
 
 // Names lists the credential names Read accepts.
 func Names() []string {
-	return []string{GitHubToken, WGPrivateKey, AdminToken, GoAuthnGatewaySecret, GitHubClientSecret}
+	return []string{GitHubToken, WGPrivateKey, AdminToken}
 }
 
-// ValidName reports whether name is one of the fixed credential names. A name
-// is never a path: no separator, no dot segment can reach Read.
+// ValidName reports whether name is one of the fixed credential names, or a
+// provider's secret (provider-<id>-secret, provider-<id>-gateway-secret). A
+// name is never a path: no separator, no dot segment can reach Read.
 func ValidName(name string) bool {
+	if providerFile.MatchString(name) {
+		return true
+	}
 	for _, n := range Names() {
 		if name == n {
 			return true

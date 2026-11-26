@@ -16,7 +16,8 @@ import (
 // meant for a resource server. RFC 9068 4: a resource server MUST check that
 // typ is at+jwt -- which go-authn/oidc does when it is asked to.
 type GoAuthnVerifier struct {
-	v *oidc.Verifier
+	issuer string
+	v      *oidc.Verifier
 }
 
 // NewGoAuthnVerifier discovers the issuer. audience is what the provider
@@ -27,7 +28,7 @@ func NewGoAuthnVerifier(ctx context.Context, issuer, audience string) (*GoAuthnV
 	if err != nil {
 		return nil, fmt.Errorf("go-authn discovery for %q: %w", issuer, err)
 	}
-	return &GoAuthnVerifier{v: v}, nil
+	return &GoAuthnVerifier{issuer: issuer, v: v}, nil
 }
 
 // Verify checks the token and names the person. The subject is what a
@@ -40,7 +41,7 @@ func (g *GoAuthnVerifier) Verify(ctx context.Context, bearer string) (*Claims, e
 	if tok.Subject() == "" {
 		return nil, fmt.Errorf("invalid token: no subject")
 	}
-	c := &Claims{Subject: tok.Subject(), Login: tok.Username(), EmailVerified: tok.EmailVerified(), Groups: tok.Groups()}
+	c := &Claims{Subject: g.issuer + "#" + tok.Subject(), Native: tok.Subject(), Login: tok.Username(), EmailVerified: tok.EmailVerified(), Groups: tok.Groups()}
 	_ = tok.Claim("idp", &c.IdP)
 	if exp, ok := tok.Expiry(); ok {
 		c.Expires = exp

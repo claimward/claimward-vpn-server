@@ -28,7 +28,7 @@ import (
 // Server holds the dependencies shared by all handlers.
 type Server struct {
 	cfg          *config.Config
-	verifier     auth.Verifier
+	auth         auth.Authenticator
 	alloc        *ipam.Allocator
 	store        *store.Store
 	gw           wg.Gateway
@@ -43,8 +43,13 @@ type Server struct {
 	mu sync.Mutex
 
 	// peers, when set, is the provider's list of registered keys: a key is
-	// enrolled only if its owner registered it there (AUTH_PROVIDER=go-authn).
+	// enrolled only if its owner registered it there (a go-authn provider).
 	peers Registry
+	// peersProvider is the one provider (a go-authn one) whose people the
+	// registry speaks for; everybody else is outside it.
+	peersProvider string
+	// peersPrefix is what that provider's Subjects start with ("<issuer>#").
+	peersPrefix string
 
 	// fwSync reinstalls the gateway's firewall from the current peers and
 	// tenants (internal/fw); nil means no firewall (tests, dry-run).
@@ -79,17 +84,24 @@ func (s *Server) resyncFirewall() {
 
 // UsePeers makes enrollment depend on reg: a key must be registered there,
 // by the person enrolling it.
-func (s *Server) UsePeers(reg Registry) { s.peers = reg }
+// It binds only the people of provider providerID, whose subjects start with
+// "<issuer>#" (issuer).
+func (s *Server) UsePeers(reg Registry, providerID, issuer string) {
+	s.peers, s.peersProvider, s.peersPrefix = reg, providerID, issuer+"#"
+}
 
 // registered is whether the key may be enrolled by claims' subject, and the
 // latest its lease may run to. Without a registry every key may, until the
 // lease TTL.
 func (s *Server) registered(key string, claims *auth.Claims, lease time.Time) (time.Time, bool) {
-	if s.peers == nil {
+	// ⛔ The registry binds the go-authn provider's people ONLY, and by the
+	// provider's own subject: a person of another provider is never matched
+	// against it, and a go-authn "sub" is never read as theirs.
+	if s.peers == nil || claims.Provider != s.peersProvider {
 		return lease, true
 	}
 	p, ok := s.peers.Lookup(key)
-	if !ok || p.Subject != claims.Subject {
+	if !ok || claims.Native == "" || p.Subject != claims.Native {
 		return time.Time{}, false
 	}
 	if p.Expires.Before(lease) {
@@ -99,7 +111,9 @@ func (s *Server) registered(key string, claims *auth.Claims, lease time.Time) (t
 }
 
 // Reconcile drops every enrolled peer allowed no longer: a key the provider
-// took back, or one now registered to somebody else.
+// took back, or one now registered to somebody else. Only the peers of the
+// registry's provider are judged (Subject starting with the UsePeers prefix);
+// allowed receives the provider's own subject.
 func (s *Server) Reconcile(allowed func(key, subject string) bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -110,7 +124,10 @@ func (s *Server) Reconcile(allowed func(key, subject string) bool) {
 		}
 	}()
 	for _, p := range s.store.List() {
-		if allowed(p.PublicKey, p.Subject) {
+		if s.peersPrefix == "" || !strings.HasPrefix(p.Subject, s.peersPrefix) {
+			continue
+		}
+		if allowed(p.PublicKey, strings.TrimPrefix(p.Subject, s.peersPrefix)) {
 			continue
 		}
 		removed = true
@@ -126,8 +143,8 @@ func (s *Server) Reconcile(allowed func(key, subject string) bool) {
 }
 
 // New builds the API server.
-func New(cfg *config.Config, v auth.Verifier, alloc *ipam.Allocator, st *store.Store, gw wg.Gateway, ts *tenant.Store, m *metrics.Metrics, serverPub string, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, verifier: v, alloc: alloc, store: st, gw: gw, tenants: ts, metrics: m, serverPubKey: serverPub, log: log}
+func New(cfg *config.Config, v auth.Authenticator, alloc *ipam.Allocator, st *store.Store, gw wg.Gateway, ts *tenant.Store, m *metrics.Metrics, serverPub string, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, auth: v, alloc: alloc, store: st, gw: gw, tenants: ts, metrics: m, serverPubKey: serverPub, log: log}
 }
 
 // Handler returns the configured HTTP mux.
@@ -135,6 +152,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+protocol.PathHealthz, s.handleHealthz)
 	mux.HandleFunc("GET "+protocol.PathWellKnownConfiguration, s.handleConfiguration)
+	mux.HandleFunc("GET "+protocol.PathWellKnownLogo, s.handleLogo)
 	mux.Handle("POST "+protocol.PathEnroll, s.authenticated(s.handleEnroll))
 	mux.Handle("POST "+protocol.PathHeartbeat, s.authenticated(s.handleHeartbeat))
 	mux.Handle("POST "+protocol.PathDeregister, s.authenticated(s.handleDeregister))
@@ -153,9 +171,18 @@ func (s *Server) authenticated(next func(http.ResponseWriter, *http.Request, *au
 			writeErr(w, http.StatusUnauthorized, "missing_token", "Authorization: Bearer <id_token> required")
 			return
 		}
-		claims, err := s.verifier.Verify(r.Context(), raw)
+		// ⛔ The request names its provider, and the token is verified by that
+		// provider ONLY: never tried against the others.
+		claims, err := s.auth.Verify(r.Context(), r.Header.Get(protocol.HeaderProvider), raw)
 		if err != nil {
-			writeErr(w, http.StatusUnauthorized, "invalid_token", err.Error())
+			switch {
+			case errors.Is(err, auth.ErrMissingProvider):
+				writeErr(w, http.StatusUnauthorized, protocol.ErrMissingProvider, err.Error())
+			case errors.Is(err, auth.ErrUnknownProvider):
+				writeErr(w, http.StatusUnauthorized, protocol.ErrUnknownProvider, err.Error())
+			default:
+				writeErr(w, http.StatusUnauthorized, "invalid_token", err.Error())
+			}
 			return
 		}
 		ctx := context.WithValue(r.Context(), claimsKey{}, claims)
@@ -233,17 +260,42 @@ func (s *Server) handleConfiguration(w http.ResponseWriter, _ *http.Request) {
 	doc := protocol.Configuration{
 		Version:    protocol.ConfigurationVersion,
 		ServerName: s.cfg.ServerName,
-		Provider:   s.cfg.AuthProvider,
+		Providers:  make([]protocol.Provider, 0, len(s.cfg.Providers)),
 		Exclusive:  s.cfg.Exclusive,
 	}
-	if s.cfg.AuthProvider == "github" {
-		doc.GitHubClientID = s.cfg.GitHubClientID
-	} else {
-		doc.OIDCIssuer, doc.OIDCClientID = s.cfg.OIDCIssuer, s.cfg.OIDCClientID
+	for _, p := range s.cfg.Providers {
+		doc.Providers = append(doc.Providers, p.Public())
+	}
+	if len(s.cfg.Logo) > 0 {
+		doc.Logo = &protocol.Logo{Path: protocol.PathWellKnownLogo, SHA256: s.cfg.LogoSHA256}
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	writeJSON(w, http.StatusOK, doc)
+}
+
+// handleLogo serves the logo SERVER_LOGO_FILE named, which config.Load already
+// proved safe (internal/svgsafe). Even so it is served as an inert image: a
+// CSP that allows nothing, `sandbox`, and nosniff, so a browser that opens the
+// URL directly runs nothing from it. The ETag is the content's SHA-256, the
+// same value the discovery document carries.
+func (s *Server) handleLogo(w http.ResponseWriter, r *http.Request) {
+	if len(s.cfg.Logo) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	etag := `"` + s.cfg.LogoSHA256 + `"`
+	h := w.Header()
+	h.Set("Content-Type", "image/svg+xml")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+	h.Set("Cache-Control", "public, max-age=300")
+	h.Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	_, _ = w.Write(s.cfg.Logo)
 }
 
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, claims *auth.Claims) {

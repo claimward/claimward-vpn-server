@@ -28,7 +28,7 @@ task dex                      # go run dexidp/dex@master + DEX_SESSIONS_ENABLED=
 Then the control plane, wired to it (another shell):
 
 ```sh
-task run:dev:oidc             # AUTH_PROVIDER=oidc, issuer=http://localhost:5556/dex
+task run:dev:oidc             # one oidc provider "dex", issuer=http://localhost:5556/dex
 ```
 
 ## Sign in (first time registers the key)

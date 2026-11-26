@@ -1,7 +1,7 @@
 // Package peers is the WireGuard keys people registered with a go-authn
 // provider, as this gateway last read them (go-authn/wireguard).
 //
-// With AUTH_PROVIDER=go-authn a valid token is not enough to enroll: the
+// With a go-authn provider a valid token is not enough to enroll: the
 // device's public key must be one its owner registered at the provider,
 // under the same subject. And when the provider takes a key back -- the
 // person or their institution was disabled, or they removed the device --

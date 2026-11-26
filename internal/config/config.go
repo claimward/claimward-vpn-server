@@ -3,8 +3,11 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"strconv"
@@ -13,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/claimward/claimward-vpn-client/pkg/svgsafe"
 	"github.com/claimward/claimward-vpn-server/internal/creds"
 )
 
@@ -38,36 +42,29 @@ type Config struct {
 	// here; the server refuses to start without it when a tenant has members.
 	GitHubToken string
 
-	AuthProvider string // "github" (default), "oidc" or "go-authn"
+	// ProvidersFile (PROVIDERS_FILE) lists the identity providers the server
+	// accepts; Providers is its content, with each provider's secrets read from
+	// the credentials directory. The server publishes them (without the
+	// secrets) and a client only needs the server's URL.
+	ProvidersFile string
+	Providers     []Provider
 
-	OIDCIssuer     string   // required when AuthProvider is "oidc" or "go-authn"
-	OIDCClientID   string   // required when AuthProvider is "oidc" or "go-authn" (token audience)
-	AllowedDomains []string // optional email-domain allowlist for authz (oidc)
-
-	// go-authn: the gateway's own client at the provider, which reads the
-	// list of registered WireGuard keys. The secret is read from a file
-	// only: an environment is copied into every child and every crash dump.
-	GatewayClientID  string
-	GatewaySecret    string        // credential file goauthn-gateway-secret
-	PeerListInterval time.Duration // how often the list is fetched
+	// go-authn (the provider of that kind, at most one): how often the list of
+	// registered WireGuard keys is fetched.
+	PeerListInterval time.Duration
 	// SSF makes the gateway also listen to the provider's Shared Signals,
 	// so that a disabling is acted on at once rather than at the next fetch.
 	// The gateway's client must be an SSF receiver at the provider.
 	SSF         bool
 	SSFInterval time.Duration
 
-	// GitHubClientID (GITHUB_CLIENT_ID, public) and GitHubClientSecret (the
-	// credential file github-client-secret) are Claimward's OAuth app, required
-	// with the github provider: only tokens that app minted are admitted.
-	GitHubClientID     string
-	GitHubClientSecret string
-
-	GitHubAPIURL      string   // default https://api.github.com (set for GHE)
-	GitHubAllowedOrgs []string // org-membership allowlist (github); required with the github provider
-	WGInterface       string   // kernel interface managed via wgctrl, e.g. "wg0"
-	WGEndpoint        string   // public host:port advertised to clients (required)
-	WGPrivateKey      string   // base64 server private key, credential file wg-private-key
-	DryRun            bool     // if true, don't touch a real device — log peer ops
+	// GitHubAPIURL (GITHUB_API_URL) is the API the tenants' named members are
+	// pinned against (default https://api.github.com, set for GHE).
+	GitHubAPIURL string
+	WGInterface  string // kernel interface managed via wgctrl, e.g. "wg0"
+	WGEndpoint   string // public host:port advertised to clients (required)
+	WGPrivateKey string // base64 server private key, credential file wg-private-key
+	DryRun       bool   // if true, don't touch a real device — log peer ops
 
 	VPNCIDR    string   // pool, e.g. "10.80.0.0/24"; server takes the first host
 	PushRoutes []string // AllowedIPs pushed to clients; defaults to [VPNCIDR]
@@ -93,6 +90,34 @@ type Config struct {
 	// tunnels. Clients refuse to connect it alongside others, and refuse others
 	// while it is connected.
 	Exclusive bool
+
+	// LogoFile (SERVER_LOGO_FILE) is an optional SVG logo, read and validated at
+	// start (svgsafe.Validate): an invalid logo stops the start, it is never
+	// dropped silently. Logo holds its bytes, LogoSHA256 their hex SHA-256.
+	LogoFile   string
+	Logo       []byte
+	LogoSHA256 string
+}
+
+// loadLogo reads the logo at path and refuses it unless svgsafe accepts it.
+func loadLogo(path string) ([]byte, string, error) {
+	if path == "" {
+		return nil, "", nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("SERVER_LOGO_FILE: %w", err)
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, svgsafe.MaxSize+1))
+	if err != nil {
+		return nil, "", fmt.Errorf("SERVER_LOGO_FILE %s: %w", path, err)
+	}
+	if err := svgsafe.Validate(b); err != nil {
+		return nil, "", fmt.Errorf("SERVER_LOGO_FILE %s refused: %w", path, err)
+	}
+	sum := sha256.Sum256(b)
+	return b, hex.EncodeToString(sum[:]), nil
 }
 
 // maxServerName bounds SERVER_NAME, in characters.
@@ -118,6 +143,9 @@ func Load() (*Config, error) {
 	if err := refuseRemovedEnv(); err != nil {
 		return nil, err
 	}
+	if err := refuseRemovedProviderEnv(); err != nil {
+		return nil, err
+	}
 	c := &Config{
 		ListenAddr:           env("LISTEN_ADDR", ":8443"),
 		TLSCert:              os.Getenv("TLS_CERT"),
@@ -125,13 +153,8 @@ func Load() (*Config, error) {
 		GRPCAddr:             env("GRPC_ADDR", ":8444"),
 		MetricsAddr:          os.Getenv("METRICS_ADDR"),
 		GRPCEndpoint:         os.Getenv("GRPC_ENDPOINT"),
-		AuthProvider:         env("AUTH_PROVIDER", "github"),
-		OIDCIssuer:           os.Getenv("OIDC_ISSUER"),
-		OIDCClientID:         os.Getenv("OIDC_CLIENT_ID"),
-		AllowedDomains:       splitCSV(os.Getenv("OIDC_ALLOWED_DOMAINS")),
+		ProvidersFile:        os.Getenv("PROVIDERS_FILE"),
 		GitHubAPIURL:         os.Getenv("GITHUB_API_URL"),
-		GitHubClientID:       os.Getenv("GITHUB_CLIENT_ID"),
-		GitHubAllowedOrgs:    splitCSV(os.Getenv("GITHUB_ALLOWED_ORGS")),
 		WGInterface:          env("WG_INTERFACE", "wg0"),
 		WGEndpoint:           os.Getenv("WG_ENDPOINT"),
 		DryRun:               boolEnv("WG_DRYRUN", false),
@@ -142,7 +165,6 @@ func Load() (*Config, error) {
 		Keepalive:            intEnv("KEEPALIVE", 25),
 		LeaseTTL:             durEnv("LEASE_TTL", 24*time.Hour),
 		MaxDevicesPerSubject: intEnv("MAX_DEVICES_PER_SUBJECT", 5),
-		GatewayClientID:      os.Getenv("GOAUTHN_GATEWAY_CLIENT_ID"),
 		PeerListInterval:     durEnv("GOAUTHN_PEER_LIST_INTERVAL", 30*time.Second),
 		SSF:                  boolEnv("GOAUTHN_SSF", false),
 		SSFInterval:          durEnv("GOAUTHN_SSF_INTERVAL", 5*time.Second),
@@ -170,35 +192,15 @@ func Load() (*Config, error) {
 	required := map[string]string{
 		"WG_ENDPOINT": c.WGEndpoint,
 	}
-	switch c.AuthProvider {
-	case "github":
-		// ⛔ Fail closed, with no escape hatch: with neither an org allowlist
-		// nor tenants naming members EVERY GitHub account would be let in. The
-		// allowlist is optional only when tenants have members, which Load
-		// cannot see: the server checks it after seeding the tenants.
-		//
-		// Likewise a token must come from OUR OAuth app, or a token minted by
-		// any other app a member authorised would enrol a peer: no client ID or
-		// no secret file, no start, and no flag to say otherwise.
-		required["GITHUB_CLIENT_ID"] = c.GitHubClientID
-		if c.GitHubClientSecret, err = creds.Read(dir, creds.GitHubClientSecret); err != nil {
-			return nil, fmt.Errorf("required credential (AUTH_PROVIDER=github, the OAuth app's client secret): %w", err)
-		}
-	case "oidc":
-		required["OIDC_ISSUER"] = c.OIDCIssuer
-		required["OIDC_CLIENT_ID"] = c.OIDCClientID
-	case "go-authn":
-		required["OIDC_ISSUER"] = c.OIDCIssuer
-		required["OIDC_CLIENT_ID"] = c.OIDCClientID
-		required["GOAUTHN_GATEWAY_CLIENT_ID"] = c.GatewayClientID
-		if c.GatewaySecret, err = creds.Read(dir, creds.GoAuthnGatewaySecret); err != nil {
-			return nil, fmt.Errorf("required credential (AUTH_PROVIDER=go-authn): %w", err)
-		}
-		if c.PeerListInterval <= 0 {
-			return nil, fmt.Errorf("GOAUTHN_PEER_LIST_INTERVAL must be positive")
-		}
-	default:
-		return nil, fmt.Errorf("invalid AUTH_PROVIDER %q (want \"github\", \"oidc\" or \"go-authn\")", c.AuthProvider)
+	// ⛔ Fail closed, per provider, with no escape hatch (see parseProviders):
+	// a github provider needs its OAuth app (client ID and secret file) and,
+	// checked by the entry gate once the tenants are loaded, an org allowlist
+	// or tenants naming members.
+	if c.Providers, err = loadProviders(c.ProvidersFile, dir); err != nil {
+		return nil, err
+	}
+	if c.PeerListInterval <= 0 {
+		return nil, fmt.Errorf("GOAUTHN_PEER_LIST_INTERVAL must be positive")
 	}
 
 	if c.ServerName, err = parseServerName(os.Getenv("SERVER_NAME")); err != nil {
@@ -209,6 +211,11 @@ func Load() (*Config, error) {
 		if c.Exclusive, err = strconv.ParseBool(v); err != nil {
 			return nil, fmt.Errorf("SERVER_EXCLUSIVE %q: want true or false", v)
 		}
+	}
+
+	c.LogoFile = os.Getenv("SERVER_LOGO_FILE")
+	if c.Logo, c.LogoSHA256, err = loadLogo(c.LogoFile); err != nil {
+		return nil, err
 	}
 
 	mtu, err := ParseTunnelMTU(os.Getenv("TUNNEL_MTU"))
@@ -271,7 +278,7 @@ var removedEnv = []struct{ env, file string }{
 	{"ADMIN_TOKEN", creds.AdminToken},
 	{"WG_PRIVATE_KEY", creds.WGPrivateKey},
 	{"WG_PRIVATE_KEY_FILE", creds.WGPrivateKey},
-	{"GOAUTHN_GATEWAY_SECRET_FILE", creds.GoAuthnGatewaySecret},
+	{"GOAUTHN_GATEWAY_SECRET_FILE", "provider-<id>-gateway-secret"},
 }
 
 // refuseRemovedEnv stops the start when a removed variable is set (non-empty):

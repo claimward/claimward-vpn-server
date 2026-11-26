@@ -2,11 +2,10 @@
 # sh assignments. Secrets are files in /etc/claimward/credentials, never here.
 # Install: install -m 0600 -o root -g wheel environment.example /etc/claimward/environment
 WG_ENDPOINT=vpn.example.org:51820
-AUTH_PROVIDER=github
-GITHUB_ALLOWED_ORGS=example-org
-# Claimward's GitHub OAuth app (public client ID); its secret is the file
-# /etc/claimward/credentials/github-client-secret.
-GITHUB_CLIENT_ID=Iv1.0123456789abcdef
+# The identity providers this server accepts (deploy/providers.example.json). Each
+# GitHub provider's OAuth app secret is the file
+# /etc/claimward/credentials/provider-<id>-secret (provider-hub-secret for the example).
+PROVIDERS_FILE=/etc/claimward/providers.json
 WG_INTERFACE=wg0
 VPN_CIDR=10.80.0.0/24
 # /metrics is OFF unless this is set; it names every tenant: keep it on loopback.

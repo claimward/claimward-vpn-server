@@ -21,7 +21,7 @@ func TestGoAuthnTakesAccessTokensOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Subject != "sub-alice" || c.Login != "alice@univ.example" || c.Email != "alice@univ.example" {
+	if c.Subject != p.Issuer()+"#sub-alice" || c.Native != "sub-alice" || c.Login != "alice@univ.example" || c.Email != "alice@univ.example" {
 		t.Errorf("claims: %+v", c)
 	}
 	// The groups and the institution, which tenants are matched on.
@@ -58,7 +58,7 @@ func TestGoAuthnIsAProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := v.(*GoAuthnVerifier); !ok {
-		t.Errorf("AUTH_PROVIDER=go-authn built a %T", v)
+		t.Errorf("kind go-authn built a %T", v)
 	}
 	if _, err := New(context.Background(), Options{Provider: "go-authn", Issuer: "http://127.0.0.1:1", ClientID: "x"}); err == nil {
 		t.Error("a provider that is not there was taken")

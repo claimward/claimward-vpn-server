@@ -12,6 +12,7 @@ import (
 func rawPost(h http.Handler, path, who, body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	r.Header.Set("Authorization", "Bearer "+who)
+	r.Header.Set(protocol.HeaderProvider, testProvider)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
