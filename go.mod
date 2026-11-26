@@ -3,7 +3,7 @@ module github.com/claimward/claimward-vpn-server
 go 1.27.4
 
 require (
-	github.com/claimward/claimward-vpn-client v0.6.0
+	github.com/claimward/claimward-vpn-client v0.8.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/go-authn/oidc v0.4.3
 	github.com/go-authn/wireguard v0.1.3

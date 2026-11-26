@@ -24,6 +24,13 @@ below gives the files the right owner and mode. (Two root-owned shapes are
 accepted: `0440` with the process's group, Kubernetes; and a read-only ACL for
 the process's uid, systemd. CI starts the systemd unit to prove the second.)
 
+The server publishes a public discovery document, unauthenticated, at
+`/.well-known/claimward-configuration` (provider, public client IDs, name,
+exclusivity; never a secret). It reaches the internet wherever the control
+plane does, so a reverse proxy must pass that path. `SERVER_NAME` (optional)
+names the server in it; `SERVER_EXCLUSIVE=true` declares that it refuses to
+share the machine with other Claimward tunnels (default `false`).
+
 `/metrics` is **off** unless `METRICS_ADDR` is set; the examples carry it as a
 commented line.
 

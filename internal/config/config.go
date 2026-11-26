@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/claimward/claimward-vpn-server/internal/creds"
 )
@@ -82,6 +84,33 @@ type Config struct {
 
 	// MaxDevicesPerSubject caps the devices one identity may have enrolled.
 	MaxDevicesPerSubject int
+
+	// ServerName (SERVER_NAME) is the display name published in the public
+	// discovery document; empty means none is published.
+	ServerName string
+	// Exclusive (SERVER_EXCLUSIVE, default false) is published in the discovery
+	// document: this server refuses to share the machine with other Claimward
+	// tunnels. Clients refuse to connect it alongside others, and refuse others
+	// while it is connected.
+	Exclusive bool
+}
+
+// maxServerName bounds SERVER_NAME, in characters.
+const maxServerName = 100
+
+// parseServerName trims SERVER_NAME and refuses what a client could not show:
+// control characters, or more than maxServerName characters.
+func parseServerName(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if utf8.RuneCountInString(v) > maxServerName {
+		return "", fmt.Errorf("SERVER_NAME is longer than %d characters", maxServerName)
+	}
+	for _, r := range v {
+		if unicode.IsControl(r) {
+			return "", fmt.Errorf("SERVER_NAME holds a control character")
+		}
+	}
+	return v, nil
 }
 
 // Load reads configuration from the environment and validates required fields.
@@ -170,6 +199,16 @@ func Load() (*Config, error) {
 		}
 	default:
 		return nil, fmt.Errorf("invalid AUTH_PROVIDER %q (want \"github\", \"oidc\" or \"go-authn\")", c.AuthProvider)
+	}
+
+	if c.ServerName, err = parseServerName(os.Getenv("SERVER_NAME")); err != nil {
+		return nil, err
+	}
+	// ⛔ Read strictly: a misspelt value would silently publish "not exclusive".
+	if v := os.Getenv("SERVER_EXCLUSIVE"); v != "" {
+		if c.Exclusive, err = strconv.ParseBool(v); err != nil {
+			return nil, fmt.Errorf("SERVER_EXCLUSIVE %q: want true or false", v)
+		}
 	}
 
 	mtu, err := ParseTunnelMTU(os.Getenv("TUNNEL_MTU"))
