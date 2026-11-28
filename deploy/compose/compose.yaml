@@ -11,7 +11,7 @@
 # it and the host's nftables: host networking and CAP_NET_ADMIN are required.
 services:
   claimward-server:
-    image: ghcr.io/claimward/claimward-vpn-server:v0.11.1
+    image: ghcr.io/claimward/claimward-vpn-server:v0.14.1
     network_mode: host
     cap_drop: [ALL]
     cap_add: [NET_ADMIN]

@@ -12,7 +12,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=ghcr.io/claimward/claimward-vpn-server:v0.11.1
+Image=ghcr.io/claimward/claimward-vpn-server:v0.14.1
 Network=host
 DropCapability=ALL
 AddCapability=NET_ADMIN
